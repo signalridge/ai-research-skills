@@ -6,6 +6,16 @@ description: >
   whether to adopt a technique, whether an approach is production-ready, what the evidence
   says before building something, or wants a technical decision brief from the literature.
   Requires a completed survey; reads .research/survey/<slug>/ and never searches on its own.
+disallowed-tools:
+  # This exit is a pure function of survey state. The "never search here" rule in the
+  # body is advisory; this makes it structural. A missing paper goes back to `survey`.
+  # Server names follow SETUP.md; a differently-named server silently escapes the
+  # restriction, so the prose rule stays as the backstop.
+  - WebSearch
+  - WebFetch
+  - mcp__tavily
+  - mcp__arxiv-mcp-server
+  - mcp__openalex
 ---
 
 # decision-brief — evidence for an engineering call

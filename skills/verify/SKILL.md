@@ -6,6 +6,13 @@ description: >
   quoted number traceable to a named table or figure, and preprint-versus-published drift
   flagged. Use when the user asks to check citations, verify references, confirm numbers,
   or audit a draft before submission.
+disallowed-tools:
+  # Verification resolves identifiers against arxiv/openalex — those are lookups, not
+  # searches, so they stay. Broad web search is removed: an entry that only a web search
+  # can corroborate is exactly the entry that should be reported as unresolvable.
+  - WebSearch
+  - WebFetch
+  - mcp__tavily
 ---
 
 # verify — citations and numbers
