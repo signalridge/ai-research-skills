@@ -1,0 +1,102 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/signalridge/research-skills/schemas/coverage.schema.json",
+  "title": "Coverage map",
+  "description": "The taxonomy grid and what occupies each cell. Empty cells are candidate gaps — but an empty cell has two explanations, and separating them is the whole game.",
+  "type": "object",
+  "required": [
+    "axes",
+    "cells"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "axes": {
+      "type": "array",
+      "minItems": 2,
+      "description": "Copied verbatim from protocol.yml. If these differ from protocol.yml the taxonomy was built post-hoc and the empty cells are artifacts.",
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "values"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "values": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 2
+          }
+        }
+      }
+    },
+    "cells": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "coords",
+          "occupants",
+          "state"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "coords": {
+            "type": "object",
+            "description": "One entry per axis, keyed by axis name.",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "occupants": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "corpus.jsonl keys landing in this cell."
+          },
+          "state": {
+            "enum": [
+              "occupied",
+              "unexplored",
+              "abandoned",
+              "undecided"
+            ],
+            "description": "An empty cell is NOT automatically a gap. 'unexplored' = nobody tried. 'abandoned' = people tried and it stopped attracting work. 'undecided' = empty and not yet discriminated — the honest default."
+          },
+          "trend_evidence": {
+            "type": "string",
+            "description": "For unexplored vs abandoned: the openalex_analyze_trends readout that discriminated them. A cell whose neighbours are high-volume and still growing is unexplored; one whose neighbours peaked three years ago is abandoned."
+          },
+          "gap_id": {
+            "type": "string",
+            "pattern": "^G[0-9]+$",
+            "description": "Set when this cell was promoted to a candidate gap in gaps.yml."
+          }
+        }
+      }
+    },
+    "recall_diagnostic": {
+      "type": "object",
+      "description": "Self-check written in Phase 4. If citation_chain contributed near zero, keyword search was doing all the work and recall is probably bad.",
+      "additionalProperties": false,
+      "properties": {
+        "includes_by_mode": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "note": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

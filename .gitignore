@@ -1,0 +1,17 @@
+# Survey state belongs to the project being surveyed, not to this plugin.
+# If you vendor a worked example, force-add it: git add -f examples/*/.research
+.research/
+
+# Python
+__pycache__/
+.ruff_cache/
+*.py[cod]
+.venv/
+venv/
+
+# macOS
+.DS_Store
+
+# Editors
+.idea/
+*.swp
