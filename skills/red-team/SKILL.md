@@ -6,6 +6,8 @@ description: >
   cherry-picking. Use when the user asks to challenge, stress-test, poke holes in, or
   sanity-check a survey or its gaps, and run it automatically before any exit is delivered.
   Reads .research/survey/<slug>/ and reports findings; may search only to attempt refutation.
+context: fork
+background: false
 ---
 
 # red-team — try to break it

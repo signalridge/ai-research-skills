@@ -42,10 +42,14 @@ an API key since 2026-02-13 (the old `mailto=` polite pool is silently ignored n
 /rs:brief <decision>        build/adopt/skip evidence matrix
 /rs:watch [arm|check]       arm the subscription, or run a digest
 /rs:audit                   red-team + citation/number integrity
+/rs:help                    where you are in a survey right now, plus the reference
 ```
 
 Skills also auto-trigger from description, so "survey retrieval-augmented agents" or
 "has anyone compared X to Y" reaches the same place.
+
+A worked example is in [`examples/`](examples/README.md) — a complete survey state
+directory at the moment it freezes, annotated with what each record demonstrates.
 
 ## The pieces
 
@@ -56,7 +60,7 @@ Skills also auto-trigger from description, so "survey retrieval-augmented agents
 | **related-work** | Thematic prose by taxonomy axis, every claim carrying a corpus key. |
 | **watch** | Re-runs the protocol, diffs the corpus, and re-tests every gap's falsifier. |
 | **decision-brief** | Claim→evidence matrix weighted by reproducibility, not venue. |
-| **red-team** | Adversarial pass at two checkpoints. Attacks recall, not just conclusions. |
+| **red-team** | Adversarial pass at two checkpoints. Attacks recall, not just conclusions. Runs in a forked context — its value is independence from the reasoning that produced the survey. |
 | **verify** | BibTeX provenance, key consistency, number traceability, preprint drift. |
 
 ## Guardrails
@@ -113,6 +117,25 @@ yourself. This is the bridge from "survey" to "standing awareness".
 reports accuracy, precision and coverage separately for a reason: a model answering 12% of
 questions at 47% precision scores 0.06 accuracy, and collapsing those into one number
 destroys the information that matters.
+
+## Develop
+
+```bash
+python3 tests/run_tests.py                                          # stdlib only
+uv run --with pyyaml --with jsonschema python3 tests/run_tests.py   # + structural
+claude plugin validate . --strict
+uvx ruff check hooks/ scripts/ tests/
+```
+
+61 assertions. Twelve feed each hook malformed JSON, empty stdin and an unexpected payload
+shape, asserting it exits 0 without blocking — a guard that crashes and blocks real work is
+worse than no guard, and that is the failure the suite is built around. Ten assert
+`rs_validate` catches every defect planted in `tests/fixtures/broken-survey`, each
+documented in that fixture's README. The worked example is validated too, so the docs
+cannot drift from the schemas.
+
+CI runs the suite on Python 3.10–3.13, first on a bare interpreter, because the hooks run
+in whatever `python3` the user already has.
 
 ## Design notes
 
