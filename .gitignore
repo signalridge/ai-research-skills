@@ -1,6 +1,6 @@
-# Survey state belongs to the project being surveyed, not to this plugin.
-# If you vendor a worked example, force-add it: git add -f examples/*/.research
-.research/
+# Survey state belongs to the project being surveyed, not to this plugin — but only at
+# the repo root. examples/ and tests/fixtures/ carry .research/ trees on purpose.
+/.research/
 
 # Python
 __pycache__/

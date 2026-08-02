@@ -1,0 +1,12 @@
+gaps:
+  - id: G1
+    statement: "No work matches retrieval recall across arms."
+    type: unvalidated-comparison
+    evidence_of_absence:
+      queries_run:
+        - "matched retrieval recall"
+        - "controlled comparison retrieval"
+      venues_swept: ["ICLR@2025"]
+      last_checked: 2026-07-01
+    confidence: high
+    closes_if: "Any paper matching retrieval recall across both arms."

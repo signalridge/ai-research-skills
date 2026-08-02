@@ -1,0 +1,21 @@
+# ILLUSTRATIVE EXAMPLE.
+gaps:
+  - id: G1
+    statement: "No work evaluates agentic retrieval against long-context baselines with retrieval recall held constant; existing comparisons control token budget instead."
+    type: unvalidated-comparison
+    evidence_of_absence:
+      queries_run:
+        - 'abs:"retrieval recall" AND abs:"long context" AND abs:"multi-hop"'
+        - 'ti:"controlled comparison" AND abs:"retrieval augmented"'
+        - "matched retrieval budget long context agent question answering"
+      venues_swept: ["ICLR@2025-2026", "NeurIPS@2025", "ACL@2025-2026", "COLM@2025"]
+      citation_chains: ["W2626778328:cites:1", "W4000000001:cited_by:1"]
+      nearest_prior_work:
+        - key: alpha2025iterative
+          why_not_it: "controls token budget, not retrieval recall — the two arms see different amounts of relevant evidence"
+        - key: beta2025longctx
+          why_not_it: "same control, opposite conclusion; the disagreement is what motivates the gap"
+      last_checked: 2026-08-03
+    # medium, not high: epsilon2026workshop may already address this and could not be resolved.
+    confidence: medium
+    closes_if: "Any paper reporting multi-hop QA with retrieval recall matched across an agentic-retrieval arm and a long-context arm."

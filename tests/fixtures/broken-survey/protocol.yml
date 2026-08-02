@@ -1,0 +1,27 @@
+topic: broken-demo
+question: "Retrieval augmented agents and long context"
+created: 2026-07-01
+last_searched_at: 2026-07-01
+phase: 4
+scope:
+  in: [multi-hop QA]
+  out: [single-hop QA]
+axes:
+  - name: method
+    values: [iterative, long-context]
+  - name: control
+    values: [token budget, retrieval recall]
+recall_modes:
+  keyword:
+    - {tool: arxiv.search_papers, q: "multi-hop retrieval"}
+  citation_chain: []
+  venue_author:
+    - {venue: ICLR, years: [2025]}
+screen:
+  include: ["evaluates >=2-hop"]
+  exclude: ["surveys"]
+  relevance_threshold: 6
+counts:
+  retrieved: 300
+  deduped: 240
+  adjudicated: 150

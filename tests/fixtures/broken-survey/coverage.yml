@@ -1,0 +1,9 @@
+axes:
+  - name: method
+    values: [iterative, long-context, hybrid]
+  - name: control
+    values: [token budget, retrieval recall]
+cells:
+  - coords: {method: iterative, control: retrieval recall}
+    occupants: []
+    state: unexplored

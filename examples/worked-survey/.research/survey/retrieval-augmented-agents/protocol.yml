@@ -1,0 +1,59 @@
+# ILLUSTRATIVE EXAMPLE — the papers below are synthetic. Citation keys are deliberately
+# unmistakable (alpha/beta/gamma...) so nothing here can be mistaken for a real reference.
+# The field-growth figures in `saturation` ARE real, from openalex_analyze_trends.
+topic: retrieval-augmented-agents
+question: "Do retrieval-augmented agents outperform long-context models on multi-hop QA when retrieval recall is held constant?"
+created: 2026-07-20
+last_searched_at: 2026-08-03
+phase: 5
+
+scope:
+  in: [multi-hop QA, agentic retrieval, long-context baselines]
+  out: [single-hop QA, RAG for code, multimodal retrieval]
+  window: 2023-01-01..
+  venues: [NeurIPS, ICLR, ICML, ACL, EMNLP, COLM]
+
+# Declared in Phase 0, BEFORE any search. 2 x 3 x 2 = 12 cells, well under the ~40 ceiling.
+axes:
+  - name: method
+    values: [iterative retrieval, long-context]
+  - name: control
+    values: [none, fixed token budget, fixed retrieval recall]
+  - name: evaluation
+    values: [2-hop, 3+-hop]
+
+recall_modes:
+  keyword:
+    - {tool: arxiv.search_papers, q: 'ti:"multi-hop" AND abs:"retrieval augmented"', cats: [cs.CL], n: 50}
+    - {tool: arxiv.search_papers, q: 'abs:"long context" ANDNOT ti:"survey"', cats: [cs.CL], n: 50}
+    - {tool: openalex.search_entities, q: '"multi-hop" AND ("retrieval" OR "memory-augmented")', per_page: 100}
+    - {tool: tavily.search, q: "agentic retrieval vs long context multi-hop benchmark"}
+  citation_chain:
+    - {tool: openalex.get_citation_graph, seed: W2626778328, direction: cites, depth: 1}
+    - {tool: openalex.get_citation_graph, seed: W2626778328, direction: cited_by, depth: 1}
+    - {tool: openalex.get_citation_graph, seed: W2626778328, direction: related_to}
+  venue_author:
+    - {tool: openalex.search_entities, venue: ICLR, years: [2025, 2026], filter: "title_and_abstract.search:retrieval"}
+    - {tool: openalex.search_entities, venue: NeurIPS, years: [2025]}
+
+screen:
+  include: ["evaluates >=2-hop", "reports a retrieval-quality ablation"]
+  exclude: ["survey papers", "no empirical evaluation", "single-hop only"]
+  relevance_threshold: 6
+
+counts:
+  retrieved: 312
+  deduped: 244
+  adjudicated: 244        # coverage: every deduped candidate was judged
+  scored_at_or_above_threshold: 4
+  unsure: 1
+  fulltext_kept: 2
+
+saturation:
+  rounds: 3
+  new_on_topic_last_round: 2      # published BEFORE created — the only population that counts
+  baseline_growth: "~3x/yr (2023:323 -> 2024:3236 -> 2025:9915 -> 2026:14086 partial)"
+  stop_rule: "<5% new on-topic published before protocol.created"
+
+budget:
+  openalex_usd_spent: 0.06
