@@ -2,7 +2,7 @@
 """Test suite for research-skills. Standard library only.
 
     python3 tests/run_tests.py
-    uv run --with pyyaml --with jsonschema python3 tests/run_tests.py   # + structural checks
+    uv run --with pyyaml --with jsonschema python3 tests/run_tests.py  # + structural
 
 Covers the three things that can silently rot:
 
@@ -203,9 +203,7 @@ def test_hooks(tmp: str) -> None:
     import datetime
 
     with open(proto, "w", encoding="utf-8") as fh:
-        fh.write(
-            f"topic: demo\nlast_searched_at: {datetime.date.today().isoformat()}\n"
-        )
+        fh.write(f"topic: demo\nlast_searched_at: {datetime.date.today().isoformat()}\n")
     rc, out, _ = run_hook("survey_staleness.py", {"cwd": tmp, "source": "startup"})
     check(
         "staleness: fresh protocol -> silent",
@@ -241,9 +239,7 @@ def test_hooks(tmp: str) -> None:
     with open(os.path.join(survey, "corpus.jsonl"), "w", encoding="utf-8") as fh:
         fh.write("\n".join(json.dumps(r) for r in recs))
 
-    rc, out, _ = run_hook(
-        "stop_survey_peer.py", {"cwd": tmp, "hook_event_name": "Stop"}
-    )
+    rc, out, _ = run_hook("stop_survey_peer.py", {"cwd": tmp, "hook_event_name": "Stop"})
     ok = rc == 0 and outcome(out) == "warn-user"
     msg = json.loads(out)["systemMessage"] if ok else ""
     check("stop: abstract-heavy corpus -> warn", ok, f"outcome={outcome(out)}")
@@ -335,7 +331,9 @@ def test_plugin_shape() -> None:
         if not head:
             continue
         fm = head.group(1)
-        check(f"{s}: declares a name", re.search(r"^name:\s*\S", fm, re.MULTILINE) is not None)
+        check(
+            f"{s}: declares a name", re.search(r"^name:\s*\S", fm, re.MULTILINE) is not None
+        )
         restricted = "disallowed-tools" in fm
         # The invariant: only survey, watch and red-team may reach for search tools.
         check(

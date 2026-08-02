@@ -12,6 +12,7 @@ that fires on a persistent condition loops forever.
 Fails open.
 """
 
+import contextlib
 import json
 import os
 import re
@@ -25,9 +26,9 @@ SINGLE_MODE_WARN = 0.8  # share of includes from one recall mode
 def load_corpus(path):
     records = []
     try:
-        with open(path, "r", encoding="utf-8", errors="replace") as fh:
-            for line in fh:
-                line = line.strip()
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            for raw in fh:
+                line = raw.strip()
                 if not line:
                     continue
                 try:
@@ -64,7 +65,7 @@ def audit(survey_dir):
     # 2. Coverage — was the tail adjudicated or quietly dropped?
     proto = os.path.join(survey_dir, "protocol.yml")
     try:
-        with open(proto, "r", encoding="utf-8", errors="replace") as fh:
+        with open(proto, encoding="utf-8", errors="replace") as fh:
             text = fh.read()
         dedup = re.search(r"^\s*deduped:\s*(\d+)", text, re.MULTILINE)
         adjud = re.search(r"^\s*adjudicated:\s*(\d+)", text, re.MULTILINE)
@@ -97,13 +98,11 @@ def audit(survey_dir):
     # 4. Gaps with no nearest prior work — usually too-narrow search, not open field.
     gaps_path = os.path.join(survey_dir, "gaps.yml")
     try:
-        with open(gaps_path, "r", encoding="utf-8", errors="replace") as fh:
+        with open(gaps_path, encoding="utf-8", errors="replace") as fh:
             gaps_text = fh.read()
         n_gaps = len(re.findall(r"^\s*-\s*id:\s*G\d+", gaps_text, re.MULTILINE))
         n_near = len(
-            re.findall(
-                r"^\s*nearest_prior_work:\s*\n\s*-\s*\S", gaps_text, re.MULTILINE
-            )
+            re.findall(r"^\s*nearest_prior_work:\s*\n\s*-\s*\S", gaps_text, re.MULTILINE)
         )
         if n_gaps and n_near < n_gaps:
             findings.append(
@@ -144,8 +143,8 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    try:
+    # Fail open, always: a guard that raises inside the hook runner blocks real work,
+    # which is strictly worse than the guard not existing.
+    with contextlib.suppress(Exception):
         main()
-    except Exception:
-        pass  # fail open, always
     sys.exit(0)

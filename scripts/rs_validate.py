@@ -89,8 +89,8 @@ def load_jsonl(path):
         return None
     out = []
     with open(path, encoding="utf-8") as fh:
-        for n, line in enumerate(fh, 1):
-            line = line.strip()
+        for n, raw in enumerate(fh, 1):
+            line = raw.strip()
             if not line:
                 continue
             try:
@@ -145,7 +145,8 @@ def check_protocol(proto):
         err(
             "protocol.yml",
             "no `axes` declared",
-            "axes must be declared in Phase 0 BEFORE searching, or empty cells are artifacts",
+            "axes must be declared in Phase 0 BEFORE searching, or every empty cell "
+            "is an artifact of what the search happened to find",
         )
     else:
         cells = 1
@@ -245,9 +246,7 @@ def check_corpus(records, proto):
             err(f"corpus.jsonl[{r.get('key', '?')}]", "exclude has no `exclude_reason`")
 
     if includes:
-        shallow = sum(
-            1 for r in includes if r.get("evidence_read") in (None, "abstract")
-        )
+        shallow = sum(1 for r in includes if r.get("evidence_read") in (None, "abstract"))
         if shallow / len(includes) >= 0.5:
             warn(
                 "corpus.jsonl",
@@ -304,8 +303,9 @@ def check_coverage(cov, proto):
             err(
                 f"coverage.yml[{label}]",
                 "marked `unexplored` with no `trend_evidence`",
-                "an unoccupied cell is not automatically unexplored — it may be abandoned. "
-                "Run the neighbour trend check in references/04-map.md, or mark it undecided",
+                "an unoccupied cell is not automatically unexplored — it may be "
+                "abandoned. Run the neighbour trend check in references/04-map.md, "
+                "or mark it undecided",
             )
         if state == "occupied" and not cell.get("occupants"):
             err(f"coverage.yml[{label}]", "marked `occupied` with no occupants")
@@ -406,9 +406,7 @@ def check_refs(survey_dir, records):
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(
-        description="Validate a research-skills survey state dir."
-    )
+    ap = argparse.ArgumentParser(description="Validate a research-skills survey state dir.")
     ap.add_argument("survey_dir")
     ap.add_argument("--strict", action="store_true", help="treat warnings as errors")
     args = ap.parse_args()

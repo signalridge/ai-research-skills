@@ -1,0 +1,50 @@
+# Pinned so CI does not inherit a config from a parent directory and so the rules a
+# contributor sees locally are the rules that gate the PR.
+
+line-length = 92
+target-version = "py310"   # hooks must run on whatever python3 the user already has
+
+[lint]
+select = [
+    "E", "W",   # pycodestyle
+    "F",        # pyflakes
+    "I",        # import order
+    "UP",       # pyupgrade
+    "B",        # bugbear
+    "SIM",      # simplify
+    "S",        # bandit
+    "DTZ",      # naive datetime
+    "PL",       # pylint
+    "RUF",
+]
+
+ignore = [
+    "PLR2004",  # magic values — thresholds read better inline than as constants
+    "PLR0912",  # branch count — the validators are deliberately flat lists of checks
+    "PLR0915",  # statement count, same
+    "S603",     # subprocess with a list arg is the safe form; that is what we use
+]
+
+[lint.per-file-ignores]
+# Hooks must fail open. A guard that raises inside Claude Code's hook runner blocks real
+# work, which is strictly worse than the guard not existing — so every entry point wraps
+# main() in a bare `except Exception: pass`. That is the design, not an oversight.
+"hooks/*.py" = [
+    "BLE001",  # blind except — deliberate, see above
+    "S110",    # try/except/pass — deliberate, see above
+    "DTZ011",  # date.today() — survey age is a local-calendar question, not an instant
+]
+
+# Tests shell out to the hooks and read files for assertions; the strict forms add noise
+# without adding safety here.
+"tests/*.py" = [
+    "S101", "S108", "S404", "BLE001", "DTZ011", "SIM115", "PLW1510",
+    "PLW0603",  # module-level pass/fail counters are the point of a tiny harness
+    "PLR0911",  # outcome() is a flat dispatch; splitting it would obscure it
+    "PLC0415",  # local imports keep each test block self-contained
+]
+
+"scripts/*.py" = [
+    "BLE001",  # a malformed state file should be reported as a finding, not a traceback
+    "DTZ011",
+]

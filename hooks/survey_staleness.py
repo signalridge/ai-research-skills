@@ -9,6 +9,7 @@ knowing it.
 Advisory only: emits context, never blocks. Fails open.
 """
 
+import contextlib
 import datetime
 import json
 import os
@@ -39,7 +40,7 @@ def scan(cwd: str):
         if not os.path.exists(path):
             continue
         try:
-            with open(path, "r", encoding="utf-8", errors="replace") as fh:
+            with open(path, encoding="utf-8", errors="replace") as fh:
                 text = fh.read()
         except OSError:
             continue
@@ -88,10 +89,11 @@ def main() -> None:
         )
     lines += [
         "",
-        "Gaps recorded in a stale survey may already be closed, and its evidence_of_absence",
-        "is dated. Before writing an absence claim, drafting related work, or scoring",
-        "gap-gate G1 against this state, run `watch` to refresh it — a check that finds",
-        "nothing still updates last_searched_at and re-dates every gap.",
+        "Gaps recorded in a stale survey may already be closed, and its",
+        "evidence_of_absence is dated. Before writing an absence claim, drafting",
+        "related work, or scoring gap-gate G1 against this state, run `watch` to",
+        "refresh it — a check that finds nothing still updates last_searched_at and",
+        "re-dates every gap.",
     ]
 
     json.dump(
@@ -106,8 +108,8 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    try:
+    # Fail open, always: a guard that raises inside the hook runner blocks real work,
+    # which is strictly worse than the guard not existing.
+    with contextlib.suppress(Exception):
         main()
-    except Exception:
-        pass  # fail open, always
     sys.exit(0)

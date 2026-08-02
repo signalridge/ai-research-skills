@@ -1,0 +1,93 @@
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      # Hooks run in whatever python3 the user has. They must work on a bare interpreter,
+      # so the default path is tested with nothing installed.
+      - name: tests (stdlib only)
+        run: python3 tests/run_tests.py
+
+      - name: tests (with structural validation)
+        run: |
+          python3 -m pip install --quiet pyyaml jsonschema
+          python3 tests/run_tests.py
+
+      - name: validator against the worked example
+        run: |
+          python3 scripts/rs_validate.py \
+            examples/worked-survey/.research/survey/retrieval-augmented-agents
+
+      - name: validator rejects the broken fixture
+        run: |
+          if python3 scripts/rs_validate.py tests/fixtures/broken-survey; then
+            echo "::error::broken fixture passed validation — a check has regressed"
+            exit 1
+          fi
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: json and yaml parse
+        run: |
+          python3 -m pip install --quiet pyyaml
+          python3 - <<'PY'
+          import json, pathlib, sys, yaml
+          bad = []
+          for p in pathlib.Path(".").rglob("*.json"):
+              if ".git" in p.parts: continue
+              try: json.loads(p.read_text())
+              except Exception as e: bad.append(f"{p}: {e}")
+          for p in pathlib.Path(".").rglob("*.yml"):
+              if ".git" in p.parts: continue
+              try: yaml.safe_load(p.read_text())
+              except Exception as e: bad.append(f"{p}: {e}")
+          for b in bad: print(f"::error::{b}")
+          sys.exit(1 if bad else 0)
+          PY
+
+      - name: skill frontmatter
+        run: |
+          python3 -m pip install --quiet pyyaml
+          python3 - <<'PY'
+          import pathlib, re, sys, yaml
+          bad = []
+          for p in pathlib.Path("skills").glob("*/SKILL.md"):
+              m = re.match(r"^---\n(.*?)\n---", p.read_text(), re.S)
+              if not m:
+                  bad.append(f"{p}: no frontmatter"); continue
+              fm = yaml.safe_load(m.group(1))
+              if not fm.get("name"): bad.append(f"{p}: no name")
+              if not fm.get("description"): bad.append(f"{p}: no description")
+              # description + when_to_use is truncated at 1536 chars in the skill listing
+              n = len(" ".join(str(fm.get("description", "")).split()))
+              if n > 1536: bad.append(f"{p}: description {n} chars, over the 1536 cap")
+          for b in bad: print(f"::error::{b}")
+          sys.exit(1 if bad else 0)
+          PY
+
+      - name: ruff
+        run: |
+          python3 -m pip install --quiet ruff
+          ruff check hooks/ scripts/ tests/
+          ruff format --check hooks/ scripts/ tests/

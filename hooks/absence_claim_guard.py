@@ -11,6 +11,7 @@ Only active inside a project that has a survey (.research/survey/). Elsewhere it
 Fails open.
 """
 
+import contextlib
 import json
 import os
 import re
@@ -22,8 +23,10 @@ ABSENCE_PATTERNS = [
     r"\bno previous work\b",
     r"\bfirst to (?:propose|show|demonstrate|study|explore|introduce|evaluate|address)\b",
     r"\bto (?:the best of )?our knowledge\b",
-    r"\b(?:has|have) not been (?:studied|explored|investigated|addressed|evaluated|"
-    r"examined|attempted|reported)\b",
+    (
+        r"\b(?:has|have) not been (?:studied|explored|investigated|addressed|evaluated|"
+        r"examined|attempted|reported)\b"
+    ),
     r"\bremains? (?:largely )?unexplored\b",
     r"\b(?:has|have) never been\b",
     r"\bno one has\b",
@@ -87,7 +90,7 @@ def gaps_evidence_state(survey_dirs):
             continue
         found = True
         try:
-            with open(p, "r", encoding="utf-8", errors="replace") as fh:
+            with open(p, encoding="utf-8", errors="replace") as fh:
                 text = fh.read()
         except OSError:
             continue
@@ -144,17 +147,15 @@ def main() -> None:
     json.dump(
         {
             "decision": "block",
-            "reason": REASON.format(
-                path=path, quotes="\n".join(hits), diagnosis=diagnosis
-            ),
+            "reason": REASON.format(path=path, quotes="\n".join(hits), diagnosis=diagnosis),
         },
         sys.stdout,
     )
 
 
 if __name__ == "__main__":
-    try:
+    # Fail open, always: a guard that raises inside the hook runner blocks real work,
+    # which is strictly worse than the guard not existing.
+    with contextlib.suppress(Exception):
         main()
-    except Exception:
-        pass  # fail open, always
     sys.exit(0)

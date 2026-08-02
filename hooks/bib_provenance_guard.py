@@ -9,6 +9,7 @@ the provenance header written by a citation-export tool.
 Fails open. A guard that crashes must never block real work.
 """
 
+import contextlib
 import json
 import os
 import re
@@ -88,7 +89,7 @@ def main() -> None:
     # An Edit appends to a file that may already be marked as tool-generated.
     if not is_full_write and os.path.exists(path):
         try:
-            with open(path, "r", encoding="utf-8", errors="replace") as fh:
+            with open(path, encoding="utf-8", errors="replace") as fh:
                 if PROVENANCE_RE.search(fh.read(4096)):
                     return
         except OSError:
@@ -99,8 +100,8 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    try:
+    # Fail open, always: a guard that raises inside the hook runner blocks real work,
+    # which is strictly worse than the guard not existing.
+    with contextlib.suppress(Exception):
         main()
-    except Exception:
-        pass  # fail open, always
     sys.exit(0)
