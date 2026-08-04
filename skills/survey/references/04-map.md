@@ -133,6 +133,23 @@ A gap with **no** nearest prior work usually means the search was too narrow, no
 gap is wide open. Real gaps sit next to something. If you cannot name the closest existing
 work and say precisely why it does not close the gap, go back to Step A.
 
+**Name the axis that differs.** "Why it is not the same" has to resolve to a specific
+difference, and there are only four kinds worth recording:
+
+| `differing_axis` | The prior work differs in |
+|---|---|
+| `object-acted-on` | what the method operates on |
+| `mechanism` | how it achieves the effect |
+| `input-granularity` | the resolution or unit it consumes |
+| `problem-setting` | the conditions or assumptions of the task |
+| `none` | **nothing. It closes the gap.** |
+
+The rule cuts both ways, and the second direction is the one people skip: a similar title
+never establishes that your gap is taken, and failing to find even one differing axis
+establishes that it is. If you work through all four and none of them differ, record
+`none` and drop the gap. Do not go looking for a fifth axis — reaching for a distinction
+after the first four came up empty is how a closed gap survives to become a wasted quarter.
+
 ### `closes_if` — write the falsifier now
 
 This is what `watch` re-tests against every new paper, forever. It must be decidable from a

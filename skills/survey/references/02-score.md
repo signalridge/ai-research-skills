@@ -31,6 +31,12 @@ produce two things.
 Not general quality. Not citation count. **Relevance to the question in `protocol.yml`.**
 A landmark paper that does not bear on your question scores low, and that is correct.
 
+**Anchor at 5 and justify movement in both directions.** Starting from "probably relevant"
+and adjusting down produces a corpus where everything scores 7. Starting at 5 forces you to
+name what moved it. Two kinds of ground move a score up and both count: something the paper
+demonstrably does (say which), or a structural reason it must bear on the question (say
+which). A record with neither stays at 5.
+
 | Score | Meaning |
 |---|---|
 | 9–10 | Directly answers the question, or is the obvious baseline any answer must beat |
@@ -111,6 +117,24 @@ After scoring, look at the distribution. Healthy shapes:
   loosening the bar.
 
 Re-thresholding is free. Re-reading is not. That is why this phase exists.
+
+## What a search result may and may not tell you
+
+You are working from titles, abstracts and search snippets in this phase. That bounds what
+you are entitled to conclude from them.
+
+**Retrieval supports metadata-level judgements only** — that this work exists, who wrote it,
+where and when it appeared, and roughly what it addresses. It does **not** support method
+details or numbers. A snippet containing "improves accuracy by 6.2 points" is not a source
+for 6.2; it is evidence that a number exists somewhere in the paper. Numbers enter the
+corpus in Phase 3, from a named table, with `looked_at: true`.
+
+This is the same discipline as `evidence_read`, applied one step earlier. Writing a
+`numbers[]` entry in this phase is the concrete mistake it prevents.
+
+**"Not found" is not "does not exist."** If a search for something returns nothing, the
+finding is *no work retrieved under these keywords* — never *no such work exists*. That
+distinction is the whole of `evidence_of_absence`, and Phase 4 will hold you to it.
 
 ## Cost discipline
 

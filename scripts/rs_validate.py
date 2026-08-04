@@ -100,19 +100,33 @@ def load_jsonl(path):
     return out
 
 
+MAX_SCHEMA_ERRORS = 12
+
+
 def check_schema(data, schema_name: str, label: str) -> None:
+    """Report every schema violation in a document, not just the first.
+
+    jsonschema.validate raises on the first error, which turns fixing a file into a
+    fix-one-rerun-find-the-next loop and hides later problems behind earlier ones.
+    iter_errors surfaces them all at once.
+    """
     if jsonschema is None or data is None:
         return
     path = os.path.join(SCHEMA_DIR, schema_name)
     try:
         with open(path, encoding="utf-8") as fh:
             schema = json.load(fh)
-        jsonschema.validate(data, schema)
     except FileNotFoundError:
         warn(label, f"schema {schema_name} not found")
-    except jsonschema.ValidationError as exc:
+        return
+
+    validator = jsonschema.Draft202012Validator(schema)
+    found = sorted(validator.iter_errors(data), key=lambda e: list(e.absolute_path))
+    for exc in found[:MAX_SCHEMA_ERRORS]:
         loc = "/".join(str(p) for p in exc.absolute_path) or "(root)"
         err(label, f"schema violation at {loc} — {exc.message}")
+    if len(found) > MAX_SCHEMA_ERRORS:
+        warn(label, f"{len(found) - MAX_SCHEMA_ERRORS} further schema violations not shown")
 
 
 # --------------------------------------------------------------------------- checks
@@ -132,13 +146,19 @@ def check_protocol(proto):
         )
 
     modes = proto.get("recall_modes") or {}
-    for mode in ("keyword", "citation_chain", "venue_author"):
+    fixes = {
+        "keyword": "all four modes are mandatory; each is blind to what the others find",
+        "citation_chain": "all four modes are mandatory; citation chaining is "
+        "terminology-blind and finds work keyword search cannot",
+        "venue_author": "all four modes are mandatory; venue sweeps catch work too "
+        "recent to be cited",
+        "contrarian": "the other three modes are all biased toward consensus. Without a "
+        "contrarian pass, red-team's cherry-picking check can only find contradictions "
+        "already in the corpus — see references/01-recall.md Mode D",
+    }
+    for mode, fix in fixes.items():
         if not modes.get(mode):
-            err(
-                "protocol.yml",
-                f"recall mode `{mode}` is empty",
-                "all three modes are mandatory; each is blind to what the others find",
-            )
+            err("protocol.yml", f"recall mode `{mode}` is empty", fix)
 
     axes = proto.get("axes") or []
     if not axes:

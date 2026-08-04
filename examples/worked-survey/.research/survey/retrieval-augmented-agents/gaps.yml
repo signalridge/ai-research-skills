@@ -13,8 +13,10 @@ gaps:
       nearest_prior_work:
         - key: alpha2025iterative
           why_not_it: "controls token budget, not retrieval recall — the two arms see different amounts of relevant evidence"
+          differing_axis: problem-setting
         - key: beta2025longctx
           why_not_it: "same control, opposite conclusion; the disagreement is what motivates the gap"
+          differing_axis: problem-setting
       last_checked: 2026-08-03
     # medium, not high: epsilon2026workshop may already address this and could not be resolved.
     confidence: medium

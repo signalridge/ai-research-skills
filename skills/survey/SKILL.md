@@ -31,11 +31,11 @@ Six phases. Read the reference file when you enter the phase; do not preload the
 | Phase | Reference | Cannot advance until |
 |---|---|---|
 | 0 Scope | [references/00-scope.md](references/00-scope.md) | Question is interrogative and answerable; **taxonomy axes named before any search** |
-| 1 Recall | [references/01-recall.md](references/01-recall.md) | All three recall modes executed and logged |
+| 1 Recall | [references/01-recall.md](references/01-recall.md) | All four recall modes executed and logged, contrarian included |
 | 2 Score | [references/02-score.md](references/02-score.md) | Every candidate has `relevance` + `contextual_summary`; screened by threshold |
 | 3 Extract | [references/03-extract.md](references/03-extract.md) | Every include has `claim`, `axes`, `code`, `evidence_read`, sourced `numbers` |
 | 4 Map | [references/04-map.md](references/04-map.md) | Coverage matrix built; empty cells discriminated; gaps carry `closes_if` |
-| 5 Saturate | [references/05-saturate.md](references/05-saturate.md) | A full round adds <5% new on-topic **net of field growth** |
+| 5 Saturate | [references/05-saturate.md](references/05-saturate.md) | A full round adds <5% new on-topic **published before `created`** |
 
 Walk them in order. Each has its own exit criteria; do not advance until the current one
 passes.
@@ -79,7 +79,12 @@ to find later.
 
 ## Backends
 
-Three, each with a job it is genuinely best at. Do not substitute one for another.
+**Check they are reachable before Phase 1.** A backend that has silently dropped is the one
+condition under which this skill must refuse to run rather than degrade — see rule 2. If
+`arxiv` is unavailable, `openalex` covers discovery and citation graphs but **not** BibTeX
+export or `watch` alerts; say which capability is missing and what that costs the survey.
+
+Three backends, each with a job it is genuinely best at. Do not substitute one for another.
 
 | Need | Call |
 |---|---|
@@ -108,42 +113,48 @@ arXiv DOIs that 404, six distinct works sharing one title, and year buckets in t
 
 These are the ones that cost something when broken. The reference files carry the rest.
 
-1. **Three orthogonal recall modes are mandatory** — keyword, citation chain, venue/author.
-   Keyword-only search has poor recall in CS/ML because terminology drifts faster than it
-   standardizes. Citation chaining finds the papers solving your problem under a name you
-   never guessed.
+1. **Four orthogonal recall modes are mandatory** — keyword, citation chain, venue/author,
+   contrarian. The first three are all biased toward consensus: keyword search returns the
+   field's own vocabulary, citation chains follow what authors chose to acknowledge, venue
+   sweeps return what got accepted. Only the contrarian pass goes looking for the work that
+   would embarrass a naive answer.
 
-2. **Record `evidence_read` honestly.** `abstract` means you read an abstract. An abstract
+2. **No retrieval, no survey.** If the search backends are unreachable, say so and stop.
+   Never fall back to writing a survey from memory — that is precisely the failure the
+   whole design exists to prevent, and it is indistinguishable from a real survey until
+   someone checks a citation.
+
+3. **Record `evidence_read` honestly.** `abstract` means you read an abstract. An abstract
    tells you what the authors wanted to claim, not what they showed. On literature benchmark's literature QA task v2,
    frontier models score 0.06–0.35 at literature extraction *without* retrieval against
    0.70 for humans with search — memory is not a source, and neither is a title.
 
-3. **Abstention is a state, not a failure.** `screen: unsure` is legitimate and tracked.
+4. **Abstention is a state, not a failure.** `screen: unsure` is legitimate and tracked.
    Report coverage (`counts.adjudicated`) separately from what you decided. A survey that
    judged 40 of 200 candidates must not look like one that judged all 200.
 
-4. **Score, then threshold — never judge include/exclude directly.** A binary call is
+5. **Score, then threshold — never judge include/exclude directly.** A binary call is
    irreversible and untunable; re-tuning means re-reading everything.
 
-5. **Taxonomy axes are declared in Phase 0, before searching.** A post-hoc taxonomy
+6. **Taxonomy axes are declared in Phase 0, before searching.** A post-hoc taxonomy
    describes your sample, not the field, and every empty cell in it is an artifact of what
    you happened to find.
 
-6. **BibTeX is tool-generated, never written.** `export_citations` only. Fabricated
+7. **BibTeX is tool-generated, never written.** `export_citations` only. Fabricated
    citations — right-looking authors, adjacent year, journal that never published it — are
    the single most common failure of LLM literature work, and a hook will block you.
 
-7. **Absence claims require typed evidence.** Every "nobody has done X" needs a `gaps.yml`
+8. **Absence claims require typed evidence.** Every "nobody has done X" needs a `gaps.yml`
    entry with populated `evidence_of_absence`. A hook enforces this on any prose you write.
 
-8. **Every gap carries a `closes_if` falsifier.** Written in advance, re-tested by `watch`.
+9. **Every gap carries a `closes_if` falsifier.** Written in advance, re-tested by `watch`.
 
-9. **Extraction is open-response, never a checkbox.** Make yourself state what the paper
-   actually claims in your own words. "Is this relevant? Y/N" will look far more competent
+10. **Extraction is open-response, never a checkbox.** Make yourself state what the paper
+    actually claims in your own words. "Is this relevant? Y/N" will look far more competent
    than it is — that swap alone is most of literature benchmark v2's 26–46% difficulty jump over
    literature benchmark.
 
-10. **A quoted number names its table and was looked at.** `numbers[].source` +
+11. **A quoted number names its table and was looked at.** `numbers[].source` +
     `looked_at: true`. Finding the right table is harder than reading a given one.
 
 ## What this skill does not do

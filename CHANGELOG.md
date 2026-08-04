@@ -1,5 +1,44 @@
 # Changelog
 
+## 0.2.0 — 2026-08-04
+
+Integrates ideas from [methodology-reference-02](methodology-reference-02)
+alongside a re-read of methodology reference 01 and ai-research-skills. That project is CC BY-NC-SA 4.0
+and this one is MIT, so every idea was re-expressed and no text was copied — see
+[CREDITS.md](CREDITS.md).
+
+### Added
+
+- **Mode D: contrarian recall.** A fourth mandatory recall mode that searches for
+  counter-evidence — negative results, failed replications, the opposing camp, method
+  critiques. The other three modes are all biased toward consensus, and without this one
+  `red-team`'s cherry-picking check could only find contradictions already in the corpus.
+- **`gap-gate` Gate 0.** Cheap disqualifiers run before any scoring and short-circuit on a
+  hit. Scoring a candidate that was dead on arrival manufactures a document that looks
+  considered when it was moot.
+- **Shelf life versus execution window** in G3. An open, worthwhile, technically reachable
+  gap is still a no-go if it closes before you finish. Asks for effective hours per week,
+  not calendar time.
+- **`differing_axis`** on `nearest_prior_work` — object-acted-on, mechanism,
+  input-granularity, problem-setting, or `none`. A similar title never establishes that a
+  gap is taken; failing to find one differing axis establishes that it is.
+- **Retrieval-bounds rule** in Phase 2. Search results support metadata-level judgements
+  only; numbers and method details come from Phase 3 with a named source. "Not found" is
+  reported as nothing retrieved under these keywords, never as nothing exists.
+- **Anchor-at-5 scoring.** Starting from "probably relevant" produces a corpus where
+  everything scores 7.
+- **Capability gate.** If the search backends are unreachable, `survey` says so and stops
+  rather than writing from memory.
+
+### Fixed
+
+- `rs_validate` reported only the **first** schema violation per document, hiding later
+  ones behind earlier ones and turning a fix into a fix-rerun-repeat loop. It now reports
+  all of them.
+- The `found_via` pattern rejected `watch:<date>`, which `watch` already emitted. Any
+  record added by a watch run would have failed validation.
+
+
 ## 0.1.0 — 2026-08-03
 
 First release. Survey-first research suite for CS/ML: one survey engine, four exits.

@@ -35,6 +35,11 @@ recall_modes:
   venue_author:
     - {tool: openalex.search_entities, venue: ICLR, years: [2025, 2026], filter: "title_and_abstract.search:retrieval"}
     - {tool: openalex.search_entities, venue: NeurIPS, years: [2025]}
+  # Mode D found beta2025longctx, which none of the three consensus-biased modes returned.
+  contrarian:
+    - {tool: arxiv.search_papers, q: 'ti:"rethinking" OR ti:"revisiting" AND abs:"retrieval augmented"', angle: method-critique}
+    - {tool: arxiv.search_papers, q: 'abs:"long context is sufficient" OR abs:"without retrieval"', angle: opposing-camp}
+    - {tool: tavily.search, q: "retrieval augmented generation does not improve negative results", angle: negative-results}
 
 screen:
   include: ["evaluates >=2-hop", "reports a retrieval-quality ablation"]

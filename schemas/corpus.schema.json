@@ -21,12 +21,12 @@
     },
     "id": {
       "type": "string",
-      "description": "Primary external identifier, e.g. arXiv:2503.01234 or doi:10.1145/…"
+      "description": "Primary external identifier, e.g. arXiv:2503.01234 or doi:10.1145/\u2026"
     },
     "openalex_id": {
       "type": "string",
       "pattern": "^W[0-9]+$",
-      "description": "OpenAlex work ID. MUST come from openalex_resolve_name — never guessed. Once set, every further OpenAlex touch of this record is a free singleton lookup."
+      "description": "OpenAlex work ID. MUST come from openalex_resolve_name \u2014 never guessed. Once set, every further OpenAlex touch of this record is a free singleton lookup."
     },
     "title": {
       "type": "string",
@@ -43,10 +43,10 @@
     "found_via": {
       "type": "array",
       "minItems": 1,
-      "description": "Which recall mode surfaced this record. If every include has only keyword:* entries, citation chaining contributed nothing and recall is suspect.",
+      "description": "Which recall mode surfaced this record. If every include has only keyword:* entries, the other three modes contributed nothing and recall is suspect. `watch:<date>` marks records added by a later watch run.",
       "items": {
         "type": "string",
-        "pattern": "^(keyword|citation_chain|venue_author|seed|manual):"
+        "pattern": "^(keyword|citation_chain|venue_author|contrarian|seed|manual|watch):"
       }
     },
     "relevance": {

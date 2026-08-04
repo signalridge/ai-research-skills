@@ -55,8 +55,8 @@ directory at the moment it freezes, annotated with what each record demonstrates
 
 | Skill | Job |
 |---|---|
-| **survey** | Six phases: scope → recall → score → extract → map → saturate. Writes all state. |
-| **gap-gate** | Is the gap open? Would closing it be a contribution? Can *you* close it? 3-gate AND, **verdict withheld**. |
+| **survey** | Six phases: scope → recall → score → extract → map → saturate. Four recall modes, contrarian included. Writes all state. |
+| **gap-gate** | Gate 0 disqualifiers short-circuit before scoring; then is the gap open? a contribution? can *you* close it before it closes itself? 3-gate AND, **verdict withheld**. |
 | **related-work** | Thematic prose by taxonomy axis, every claim carrying a corpus key. |
 | **watch** | Re-runs the protocol, diffs the corpus, and re-tests every gap's falsifier. |
 | **decision-brief** | Claim→evidence matrix weighted by reproducibility, not venue. |
@@ -98,16 +98,17 @@ The second form adds structural checks. Both run the semantic checks, which are 
 that catch broken surveys: a taxonomy that drifted after searching, a `high`-confidence gap
 resting on two queries, counts claiming more coverage than the corpus supports.
 
-## Four fields that carry the design
+## Five fields that carry the design
 
 **`evidence_read`** on every record (`abstract` … `full`). A survey that is 90%
 abstract-only is a different object from one that is full-text, and nothing else makes that
 visible. Empirical anchor: without retrieval, frontier models score 0.06–0.35 at literature
 extraction where humans with search get 0.70.
 
-**`found_via`** — which recall mode surfaced each paper. If citation chaining contributed
-nothing, the search was keyword-shaped and every gap downstream is suspect. A free
-self-diagnostic.
+**`found_via`** — which of the four recall modes surfaced each paper. Three of them are
+biased toward consensus; only the **contrarian** pass hunts disagreement on purpose. Without
+it, `red-team`'s cherry-picking check can only find contradictions already in the corpus, and
+the survey reports a consensus manufactured by its own search strategy.
 
 **`closes_if`** on every gap — a falsifier written in advance, re-tested by `watch` against
 every new paper. Without it a gap closes silently while you spend six months closing it
@@ -127,9 +128,9 @@ claude plugin validate . --strict
 uvx ruff check hooks/ scripts/ tests/
 ```
 
-61 assertions. Twelve feed each hook malformed JSON, empty stdin and an unexpected payload
+64 assertions. Twelve feed each hook malformed JSON, empty stdin and an unexpected payload
 shape, asserting it exits 0 without blocking — a guard that crashes and blocks real work is
-worse than no guard, and that is the failure the suite is built around. Ten assert
+worse than no guard, and that is the failure the suite is built around. Eleven assert
 `rs_validate` catches every defect planted in `tests/fixtures/broken-survey`, each
 documented in that fixture's README. The worked example is validated too, so the docs
 cannot drift from the schemas.
@@ -139,16 +140,22 @@ in whatever `python3` the user already has.
 
 ## Design notes
 
-- **[DESIGN.md](DESIGN.md)** — the full design, the eleven rules and the failure each traces
+- **[DESIGN.md](DESIGN.md)** — the full design, the sixteen rules and the failure each traces
   to, what is deliberately not built, and a changelog of what was folded in from elsewhere.
 - **[SETUP.md](SETUP.md)** — backend configuration, OpenAlex budget, and verified failure
   modes (arXiv DOIs that 404, six works sharing one title, year buckets in the future).
+- **[CREDITS.md](CREDITS.md)** — what came from where, and the licensing position. Notably:
+  methodology reference 02 is CC BY-NC-SA 4.0 and this repo is MIT, so ideas from it were
+  re-expressed and no text was copied.
 
 Built after surveying [scientific skills catalog/scientific-agent-skills](catalog-reference-01),
 [catalog-reference-02](catalog-reference-02),
-[methodology-reference-03](methodology-reference-03), and
-[methodology-reference-01](methodology-reference-01) — and folding in retrieval-summary benchmark's RCS
-scoring, literature benchmark's accuracy/precision/coverage split, and `gap-to-topic`'s 3-gate dossier.
+[methodology-reference-03](methodology-reference-03),
+[methodology-reference-01](methodology-reference-01), and
+[methodology-reference-02](methodology-reference-02) — and folding
+in retrieval-summary benchmark's RCS scoring, literature benchmark's accuracy/precision/coverage split, `gap-to-topic`'s
+3-gate dossier, and methodology reference 02' judgment criteria. Full provenance in
+[CREDITS.md](CREDITS.md).
 
 ## License
 

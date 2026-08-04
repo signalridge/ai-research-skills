@@ -30,7 +30,7 @@
           "statement": {
             "type": "string",
             "minLength": 20,
-            "description": "What is missing, phrased as a testable claim — not as a topic."
+            "description": "What is missing, phrased as a testable claim \u2014 not as a topic."
           },
           "type": {
             "enum": [
@@ -55,7 +55,7 @@
                 "items": {
                   "type": "string"
                 },
-                "description": "Verbatim. At least three DISTINCT phrasings — the same query reworded is one phrasing."
+                "description": "Verbatim. At least three DISTINCT phrasings \u2014 the same query reworded is one phrasing."
               },
               "venues_swept": {
                 "type": "array",
@@ -79,7 +79,8 @@
                   "type": "object",
                   "required": [
                     "key",
-                    "why_not_it"
+                    "why_not_it",
+                    "differing_axis"
                   ],
                   "additionalProperties": false,
                   "properties": {
@@ -89,6 +90,16 @@
                     "why_not_it": {
                       "type": "string",
                       "minLength": 10
+                    },
+                    "differing_axis": {
+                      "enum": [
+                        "object-acted-on",
+                        "mechanism",
+                        "input-granularity",
+                        "problem-setting",
+                        "none"
+                      ],
+                      "description": "Which axis actually differs from the nearest prior work. A similar title never establishes duplication; duplication is failing to find even ONE differing axis. `none` means the gap is closed by this work \u2014 say so rather than reaching for a distinction."
                     }
                   }
                 }
@@ -132,7 +143,7 @@
                   "conditional",
                   "no-go"
                 ],
-                "description": "3-gate AND. Any gate failing makes this no-go. This is a summary of the evidence, NOT a recommendation — the worth-it call belongs to the researcher."
+                "description": "3-gate AND. Any gate failing makes this no-go. This is a summary of the evidence, NOT a recommendation \u2014 the worth-it call belongs to the researcher."
               }
             }
           }

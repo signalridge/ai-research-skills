@@ -7,6 +7,9 @@ gaps:
         - "matched retrieval recall"
         - "controlled comparison retrieval"
       venues_swept: ["ICLR@2025"]
+      nearest_prior_work:
+        - key: alpha2025broken
+          why_not_it: "uses a different dataset"
       last_checked: 2026-07-01
     confidence: high
     closes_if: "Any paper matching retrieval recall across both arms."

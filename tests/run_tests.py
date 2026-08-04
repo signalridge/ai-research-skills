@@ -292,6 +292,7 @@ def test_validator() -> None:
     expected = [
         ("1  non-interrogative question", "not interrogative"),
         ("2  empty citation_chain mode", "citation_chain"),
+        ("2b missing contrarian mode", "recall mode `contrarian` is empty"),
         ("3  low adjudication coverage", "adjudicated"),
         ("4  include without claim", "missing `claim`"),
         ("5  exclude without reason", "exclude_reason"),
@@ -303,6 +304,24 @@ def test_validator() -> None:
     ]
     for label, needle in expected:
         check(f"catches defect {label}", needle in out, f"missing {needle!r}")
+
+    try:
+        import jsonschema  # noqa: F401
+
+        # iter_errors surfaces every violation; validate() would stop at the first and
+        # hide this one behind the queries_run error earlier in the same document.
+        check(
+            "catches defect 11 nearest_prior_work without differing_axis",
+            "'differing_axis' is a required property" in out,
+            "missing differing_axis violation",
+        )
+        check(
+            "reports more than one schema error per document",
+            out.count("schema violation") > 1,
+            f"only {out.count('schema violation')} schema violations reported",
+        )
+    except ImportError:
+        pass
 
     rc, out = run_validate(EXAMPLE)
     check(

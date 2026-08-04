@@ -1,28 +1,38 @@
 # Phase 1 — Recall
 
-Find candidates three different ways. Log every query verbatim.
+Find candidates four different ways. Log every query verbatim.
 
-**Exit criteria:** all three recall modes executed and recorded in
+**Exit criteria:** all four recall modes executed and recorded in
 `protocol.yml.recall_modes`; candidates deduped into `corpus.jsonl` with `found_via` set;
 `counts.retrieved` and `counts.deduped` written.
 
 ---
 
-## Why three modes
+## Why four modes
 
-Each mode is blind to what the others find.
+Each mode is structurally blind to what the others find.
 
 - **Keyword** misses papers that solve your problem under a name you did not guess.
   Terminology in CS/ML drifts faster than it standardizes: *content moderation* =
   *safety filtering* = *NSFW detection*; *chain-of-thought* = *scratchpad* =
   *intermediate reasoning*.
 - **Citation chaining** is terminology-blind — it follows what authors thought was related,
-  which is exactly the signal keyword search cannot see. It is usually the highest-recall
-  mode, and if it contributes nothing to your includes, your search is keyword-shaped.
+  which is exactly the signal keyword search cannot see. Usually the highest-recall mode,
+  and if it contributes nothing to your includes, your search is keyword-shaped.
 - **Venue/author sweep** catches work too recent to be cited and too oddly-phrased to
   match, and it is how you find that one group publishing on this continuously.
+- **Contrarian** hunts disagreement on purpose. The other three are all biased toward
+  consensus: keyword search returns the field's own vocabulary, citation chains follow
+  what authors chose to acknowledge, venue sweeps return what got accepted. A paper
+  refuting the mainstream frequently shares none of those — different words, uncited by
+  the work it contradicts, sometimes in a workshop or a different venue entirely.
 
-All three are mandatory. `rs_validate` fails a protocol missing any of them.
+All four are mandatory. `rs_validate` fails a protocol missing any of them.
+
+Mode D is not optional politeness. `red-team` checkpoint B asks whether any corpus record
+contradicts a claim in your draft — and that check can only find contradictions **already
+in the corpus**. If recall never went looking for them, the check passes vacuously and the
+survey reports a consensus that was manufactured by its own search strategy.
 
 ---
 
@@ -131,6 +141,41 @@ surfaces all of it.
 > an unfamiliar filter. Invalid field names produce 400s, and several widely-copied field
 > names are dead: `host_venue` → `primary_location`, `concepts` → `topics`,
 > `grants` → `funders`/`awards`.
+
+## Mode D — Contrarian
+
+Search for the work that would embarrass a naive answer to your question. Four angles;
+run at least two, and record which.
+
+| Angle | What you are looking for | Query shapes |
+|---|---|---|
+| **Negative results** | Papers reporting the method *not* working, or working only under conditions nobody mentions | `"negative results"`, `"does not improve"`, `"fails to"`, `"limitations of"` + your method |
+| **Failed replication** | Someone reran it and got something else | `"reproducing"`, `"replication"`, `"revisiting"`, `"a closer look at"`, `"rethinking"` + method |
+| **The opposing camp** | Whoever argues the alternative is sufficient | Take the *other* value on your primary axis and search it as the answer, not the baseline |
+| **Method critique** | Papers attacking how the field measures this | `"evaluation"`, `"benchmark"`, `"pitfalls"`, `"illusion"`, `"do we really need"` + your task |
+
+```
+arxiv → search_papers(query: 'ti:"rethinking" OR ti:"revisiting" AND abs:"retrieval augmented"')
+arxiv → search_papers(query: 'abs:"long context is sufficient" OR abs:"without retrieval"')
+tavily → tavily_search(query: "criticism of retrieval augmented generation benchmarks")
+```
+
+Titles beginning *Rethinking…*, *Revisiting…*, *A Closer Look at…*, *Do We Really Need…*,
+*The Illusion of…* are the field's own convention for this genre. Search the convention.
+
+Two rules on what you do with what you find:
+
+1. **A contrarian paper is scored like any other.** It goes through Phase 2 on the same
+   rubric. Finding a critic does not mean the critic is right, and this mode is not a
+   licence to weight disagreement above evidence.
+2. **A genuine disagreement is a finding, not a problem.** Two papers reporting opposite
+   results on an overlapping benchmark is the most interesting sentence you will write.
+   Record both, and in Phase 3 record *why* they disagree — usually they controlled
+   different variables, which is frequently the gap itself.
+
+If Mode D returns nothing on a mature topic, that is a signal worth stating: either the
+result is genuinely uncontested, or you searched the consensus vocabulary again. Say which
+you believe and why.
 
 ---
 

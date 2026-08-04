@@ -4,9 +4,9 @@ A lean, guarded research skill suite for CS/ML. **One survey engine, four exits.
 
 Domain: CS / ML / AI. Weight: lean + guarded (~7 skills, 4 hooks, 6 commands).
 
-Revision 2 (2026-08-03) — folds in retrieval-summary benchmark's RCS scoring, literature benchmark's
-accuracy/precision/coverage separation, and an OpenAlex backend. See §9 for what
-changed and why.
+Revision 3 (2026-08-04) — adds a contrarian recall mode, a disqualifier gate before
+scoring, and shelf-life-versus-execution-window feasibility. See §9 for the full history
+and [CREDITS.md](CREDITS.md) for provenance and licensing.
 
 ---
 
@@ -69,7 +69,7 @@ scope:
   window: 2023-01-01..
   venues: [NeurIPS, ICLR, ICML, ACL, EMNLP, COLM]
 
-recall_modes:                          # ALL THREE REQUIRED — see §5 rule 1
+recall_modes:                          # ALL FOUR REQUIRED — see §5 rule 1
   keyword:
     - {tool: arxiv.search_papers, q: 'ti:"multi-hop" AND abs:"retrieval"', cats: [cs.CL], n: 50}
     - {tool: openalex.search_entities, q: '"multi-hop" AND "retrieval"', per_page: 100}
@@ -77,10 +77,12 @@ recall_modes:                          # ALL THREE REQUIRED — see §5 rule 1
   citation_chain:
     - {tool: openalex.get_citation_graph, seed: W..., direction: cites,    per_page: 100}
     - {tool: openalex.get_citation_graph, seed: W..., direction: cited_by, per_page: 100}
-    - {tool: arxiv.citation_graph, seed: "arXiv:2401.xxxxx"}
   venue_author:
     - {tool: openalex.search_entities, filters: {"primary_location.source.id": S..., publication_year: "2025-2026"}}
     - {group: "<lab name>", via: openalex.resolve_name}
+  contrarian:                          # the only mode that hunts disagreement on purpose
+    - {tool: arxiv.search_papers, q: 'ti:"rethinking" OR ti:"revisiting"', angle: method-critique}
+    - {tool: tavily.search, q: "<method> does not improve negative results", angle: negative-results}
 
 screen:
   include: ["evaluates >=2-hop", "reports retrieval quality ablation"]
@@ -140,7 +142,8 @@ Five fields do disproportionate work:
   `full`. This makes depth auditable and lets the stop-hook refuse conclusions resting on
   abstracts alone. **No surveyed repo has this.**
 - **`found_via`** — which recall mode surfaced it. If every include came from `keyword`,
-  citation chaining did nothing and recall is probably bad. A free self-diagnostic.
+  the other three modes did nothing and recall is probably bad. A free self-diagnostic, and
+  the one that told us Mode D was missing.
 - **`numbers[].source` + `looked_at`** — any figure quoted in an exit must name its table
   or figure and have been *looked at*, not merely parsed. literature benchmark v2's harder `retrieve`
   variants exist precisely because finding the right table is harder than reading a
@@ -168,7 +171,8 @@ gaps:
       venues_swept: ["ICLR@2025-2026", "NeurIPS@2025", "ACL@2025-2026", "COLM@2025"]
       citation_chains: ["W2626778328:cites:1", "W4391234567:cited_by:1"]
       nearest_prior_work:
-        - {key: sample2025iterative, why_not_it: "compares at fixed token budget, not fixed recall"}
+        - {key: sample2025iterative, why_not_it: "compares at fixed token budget, not fixed recall",
+           differing_axis: problem-setting}   # `none` here means the gap is closed
       last_checked: 2026-08-03
     confidence: medium              # high | medium | low — see §5 rule 6
     closes_if: "Any paper reporting multi-hop QA with retrieval recall matched across
@@ -356,14 +360,18 @@ Six, matching methodology reference 01. Everything else auto-triggers from descr
 
 ---
 
-## 5. The eleven rules, and the failure each one traces to
+## 5. The sixteen rules, and the failure each one traces to
 
 methodology reference 01' discipline: no rule without a scar.
 
-1. **Three orthogonal recall modes are mandatory** (keyword, citation chain, venue/author).
-   ← Keyword-only search has poor recall in CS/ML because terminology drifts faster than it
-   standardizes. Citation chaining finds papers that solve your problem under a name you
-   never guessed.
+1. **Four orthogonal recall modes are mandatory** (keyword, citation chain, venue/author,
+   contrarian). ← Keyword-only search has poor recall in CS/ML because terminology drifts
+   faster than it standardizes. But the deeper problem is that the first three modes are all
+   biased toward *consensus*: keyword search returns the field's own vocabulary, citation
+   chains follow what authors chose to acknowledge, venue sweeps return what got accepted. A
+   paper refuting the mainstream shares none of those. Without a contrarian pass, `red-team`'s
+   cherry-picking check passes vacuously — it can only find contradictions already in the
+   corpus — and the survey reports a consensus manufactured by its own search strategy.
 2. **`evidence_read` on every record.** ← Surveys confidently built on abstracts. An
    abstract tells you what the authors want to claim, not what they showed. Empirical
    anchor: on literature benchmark's literature QA task v2, frontier models score **0.06–0.35 accuracy** at
@@ -407,7 +415,27 @@ methodology reference 01' discipline: no rule without a scar.
     tasks into `img` / `pdf` / `retrieve` variants because *finding* the right table is
     much harder than reading a given one. Independently, methodology reference 01 ships a `visual_check`
     hook and experiment-generation benchmark added a VLM figure-review loop. Three systems converged here.
-12. **The gate assembles evidence; the human renders the verdict.** ← From `gap-to-topic`.
+12. **Disqualify before scoring.** ← A careful three-gate assessment of a candidate that
+    was dead on arrival is not thoroughness; it is decoration on a rejection, and it
+    manufactures a document that *looks* considered. `gap-gate` Gate 0 reads state it
+    already has, and stops.
+
+13. **Retrieval bounds what you may conclude from it.** ← A search snippet establishes that
+    a work exists and roughly what it addresses. It is not a source for a number or a
+    method detail, and "nothing retrieved under these keywords" is not "nothing exists."
+    Both halves are routinely collapsed, and both collapses produce confident errors.
+
+14. **A gap is only taken if no axis differs.** ← A similar title establishes nothing.
+    Duplication is failing to find even one differing axis among object-acted-on,
+    mechanism, input-granularity and problem-setting. The rule cuts both ways: if all four
+    come up the same, record it and drop the gap rather than reaching for a fifth.
+
+15. **A gap has a shelf life, and it is a feasibility criterion.** ← An open, worthwhile,
+    technically reachable gap is still a no-go if it will close before you finish. Ten
+    focused hours a week against a six-month shelf life is a deadline set by strangers.
+    G3 compares the two explicitly.
+
+16. **The gate assembles evidence; the human renders the verdict.** ← From `gap-to-topic`.
     A go/no-go on months of your time is not a decision to delegate, and a confident
     machine verdict crowds out the judgment that should be doing the work.
 
@@ -484,6 +512,24 @@ A full survey round — ~20 searches plus a few hundred list/graph calls — cos
 ---
 
 ## 9. Changelog
+
+**Revision 3 (2026-08-04)** — after surveying methodology-reference-02 alongside a
+re-read of methodology reference 01 and ai-research-skills. Adopted:
+
+| Change | Source |
+|---|---|
+| Mode D contrarian recall; rule 1 now four modes | methodology reference 02 `deep-research` adversarial search perspectives |
+| `gap-gate` Gate 0 disqualifiers with short-circuit (rule 12) | methodology reference 02 `idea-evaluator` fatal-flaws-before-scoring |
+| Retrieval-bounds rule in Phase 2 (rule 13) | methodology reference 02 `idea-evaluator` novelty-grounding discipline |
+| `differing_axis` on `nearest_prior_work` (rule 14) | same |
+| G3 shelf life vs execution window (rule 15) | methodology reference 02 handbook §2.1 lifecycle/capability matching |
+| Anchor scoring at 5 and justify movement | methodology reference 02 five-dimension scoring discipline |
+| `rs_validate` reports every schema violation, not the first | found while testing the above |
+| `found_via` accepted `watch:` — it did not, and `watch` already emitted it | found while testing the above |
+
+Nothing was copied. methodology reference 02 is CC BY-NC-SA 4.0 and this repo is MIT; see
+[CREDITS.md](CREDITS.md) for the licensing position and full provenance.
+
 
 **Revision 2 (2026-08-03)** — after verifying an external survey report on the scientific
 agent ecosystem. Adopted:

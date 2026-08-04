@@ -43,5 +43,5 @@ cells:
     state: undecided
 
 recall_diagnostic:
-  includes_by_mode: {keyword: 2, citation_chain: 2, venue_author: 1}
-  note: "All three modes contributed. beta2025longctx came only from citation chaining — keyword search never returned it, which is the case for running that mode."
+  includes_by_mode: {keyword: 2, citation_chain: 1, venue_author: 1, contrarian: 1}
+  note: "All four modes contributed. beta2025longctx came only from the contrarian pass — keyword search used the mainstream vocabulary and the citation chains never reached it, because the papers it contradicts do not cite it. Dropping Mode D would have produced a survey reporting a consensus that does not exist."
