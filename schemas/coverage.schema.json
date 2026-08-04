@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/signalridge/research-skills/schemas/coverage.schema.json",
   "title": "Coverage map",
-  "description": "The taxonomy grid and what occupies each cell. Empty cells are candidate gaps — but an empty cell has two explanations, and separating them is the whole game.",
+  "description": "The taxonomy grid and what occupies each cell. Empty cells are candidate gaps \u2014 but an empty cell has two explanations, and separating them is the whole game.",
   "type": "object",
   "required": [
     "axes",
@@ -65,13 +65,14 @@
               "occupied",
               "unexplored",
               "abandoned",
+              "avoided",
               "undecided"
             ],
-            "description": "An empty cell is NOT automatically a gap. 'unexplored' = nobody tried. 'abandoned' = people tried and it stopped attracting work. 'undecided' = empty and not yet discriminated — the honest default."
+            "description": "An empty cell is NOT automatically a gap, and 'empty because people stopped' has two opposite readings. `unexplored` = nobody tried. `abandoned` = tried, results did not hold up, the field moved on \u2014 a warning. `avoided` = the field keeps naming it as an open problem and nobody attempts it, usually because it is hard \u2014 often the highest-value target, not a warning. `undecided` = empty and not yet discriminated, the honest default."
           },
           "trend_evidence": {
             "type": "string",
-            "description": "For unexplored vs abandoned: the openalex_analyze_trends readout that discriminated them. A cell whose neighbours are high-volume and still growing is unexplored; one whose neighbours peaked three years ago is abandoned."
+            "description": "The readout that discriminated this cell. For unexplored vs abandoned: neighbours high-volume and growing means unexplored; neighbours peaked years ago means the work stopped. For abandoned vs avoided: count papers naming this as future work or a known limitation without attempting it. Repeated over years with no attempts is `avoided`."
           },
           "gap_id": {
             "type": "string",

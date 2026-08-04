@@ -41,7 +41,7 @@ explains it is not.
 
 A handbook plus skills distilling a decade of supervision at SIGMOD/VLDB/ICML/NeurIPS. It
 is strong exactly where this plugin was thin: **judgment criteria**, as opposed to process.
-Four ideas were adopted and rewritten:
+Five ideas were adopted and rewritten:
 
 - **Disqualifier check before scoring** → `gap-gate` Gate 0. Their `idea-evaluator` runs a
   fatal-flaws audit ahead of its five-dimension scoring and short-circuits on a critical
@@ -59,6 +59,12 @@ Four ideas were adopted and rewritten:
   types against lifecycles and student profiles, and asks about effective hours per week
   rather than calendar time. G3's shelf-life-versus-execution-window check is that idea
   applied to gaps.
+- **The elephant in the room** → the `avoided` coverage state and a corrected G2 rubric.
+  Their paradigm-shift probe asks whether an idea addresses a problem the community sees but
+  avoids. This plugin had no way to express that: `avoided` and `abandoned` both collapsed
+  to `abandoned`, which G2 scored 1 — so the gate would have systematically discarded the
+  best gaps. The four probe questions were also kept as a **calibration** step in G2 rather
+  than a scored gate, which follows their own guidance that the probe is not a gate.
 
 Their `deep-research` skill also motivated **Mode D (contrarian)** in Phase 1: it searches
 from adversarial perspectives — the critics, the methodology sceptics — where this plugin
@@ -118,3 +124,8 @@ that check passed vacuously, and the survey would report a consensus manufacture
 search strategy.
 
 The idea came from elsewhere. The bug it revealed was ours.
+
+The same thing happened twice. The `avoided` state exists because their "elephant in the
+room" probe had no expressible counterpart here — and working out why exposed that G2 would
+have scored an acknowledged, routed-around problem identically to a dead end. Borrowed
+vocabulary is useful mostly for the things it makes you notice you cannot say.

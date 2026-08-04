@@ -16,6 +16,17 @@ and this one is MIT, so every idea was re-expressed and no text was copied — s
 - **`gap-gate` Gate 0.** Cheap disqualifiers run before any scoring and short-circuit on a
   hit. Scoring a candidate that was dead on arrival manufactures a document that looks
   considered when it was moot.
+- **`avoided` coverage state, and a corrected G2 rubric.** `avoided` and `abandoned` both
+  mean the work stopped, and they score at opposite ends: `abandoned` is a dead end,
+  `avoided` is an acknowledged problem the field routes around because it is hard.
+  Previously both collapsed to `abandoned`, which G2 scored 1 — so the gate would have
+  systematically discarded the highest-value class of gap. Phase 4 gains Step C, which
+  discriminates them by counting papers that name the problem as future work without
+  attempting it.
+- **G2 shape probe** — four calibration questions (hidden assumption, known-and-avoided,
+  newly possible, so-what). No score attaches; it exists so the dossier's framing matches
+  reality in both directions, since dressing an incremental gap as a paradigm shift invites
+  a reviewer to puncture it and burying a structural one wastes it.
 - **Shelf life versus execution window** in G3. An open, worthwhile, technically reachable
   gap is still a no-go if it closes before you finish. Asks for effective hours per week,
   not calendar time.

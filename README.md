@@ -128,9 +128,9 @@ claude plugin validate . --strict
 uvx ruff check hooks/ scripts/ tests/
 ```
 
-64 assertions. Twelve feed each hook malformed JSON, empty stdin and an unexpected payload
+65 assertions. Twelve feed each hook malformed JSON, empty stdin and an unexpected payload
 shape, asserting it exits 0 without blocking — a guard that crashes and blocks real work is
-worse than no guard, and that is the failure the suite is built around. Eleven assert
+worse than no guard, and that is the failure the suite is built around. Twelve assert
 `rs_validate` catches every defect planted in `tests/fixtures/broken-survey`, each
 documented in that fixture's README. The worked example is validated too, so the docs
 cannot drift from the schemas.
@@ -140,7 +140,7 @@ in whatever `python3` the user already has.
 
 ## Design notes
 
-- **[DESIGN.md](DESIGN.md)** — the full design, the sixteen rules and the failure each traces
+- **[DESIGN.md](DESIGN.md)** — the full design, the seventeen rules and the failure each traces
   to, what is deliberately not built, and a changelog of what was folded in from elsewhere.
 - **[SETUP.md](SETUP.md)** — backend configuration, OpenAlex budget, and verified failure
   modes (arXiv DOIs that 404, six works sharing one title, year buckets in the future).

@@ -301,6 +301,7 @@ def test_validator() -> None:
         ("8  high confidence on thin evidence", "confidence `high` but missing"),
         ("9  bib without provenance", "no tool-provenance header"),
         ("10 single-mode recall", "no other mode"),
+        ("12 abandoned cell promoted to a gap", "marked `abandoned` but promoted"),
     ]
     for label, needle in expected:
         check(f"catches defect {label}", needle in out, f"missing {needle!r}")

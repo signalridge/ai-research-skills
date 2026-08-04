@@ -7,3 +7,8 @@ cells:
   - coords: {method: iterative, control: retrieval recall}
     occupants: []
     state: unexplored
+  - coords: {method: long-context, control: token budget}
+    occupants: []
+    state: abandoned
+    trend_evidence: "peaked 2023, declining"
+    gap_id: G1

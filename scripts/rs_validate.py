@@ -319,18 +319,27 @@ def check_coverage(cov, proto):
         coords = cell.get("coords") or {}
         label = ",".join(f"{k}={v}" for k, v in coords.items()) or "?"
         state = cell.get("state")
-        if state == "unexplored" and not cell.get("trend_evidence"):
+        if state in ("unexplored", "avoided") and not cell.get("trend_evidence"):
             err(
                 f"coverage.yml[{label}]",
                 "marked `unexplored` with no `trend_evidence`",
                 "an unoccupied cell is not automatically unexplored — it may be "
-                "abandoned. Run the neighbour trend check in references/04-map.md, "
-                "or mark it undecided",
+                "abandoned or avoided, which score at opposite ends of G2. Run the "
+                "neighbour trend check in references/04-map.md Steps B-C, or mark it "
+                "undecided",
             )
         if state == "occupied" and not cell.get("occupants"):
             err(f"coverage.yml[{label}]", "marked `occupied` with no occupants")
         if state != "occupied" and cell.get("occupants"):
             err(f"coverage.yml[{label}]", f"has occupants but state is `{state}`")
+        if state == "abandoned" and cell.get("gap_id"):
+            err(
+                f"coverage.yml[{label}]",
+                f"marked `abandoned` but promoted to gap {cell['gap_id']}",
+                "abandoned means the field tried and it did not hold up — read that "
+                "failure first. If the field never actually tried, the cell is "
+                "`avoided`, not `abandoned`; see references/04-map.md Step C",
+            )
 
 
 def check_gaps(gaps):

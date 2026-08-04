@@ -31,10 +31,13 @@ cells:
     trend_evidence: "Same neighbourhood as above; the long-context arm of the same missing comparison."
     gap_id: G1
 
-  # Empty and NOT claimed as a gap — the honest default when discrimination failed.
+  # `avoided`, not `abandoned` — the distinction that decides G2. Work here stopped, but
+  # papers keep naming it as future work without attempting it. Scores 5, not 1.
   - coords: {method: long-context, control: none, evaluation: 3+-hop}
     occupants: []
-    state: undecided
+    state: avoided
+    trend_evidence: "Neighbour volume flat since 2024, so the work stopped — but four papers across 2024-2026 (alpha2025iterative §7, beta2025longctx §6, gamma2026threehop §5, and two outside the corpus) name 3+-hop long-context evaluation as future work or a known limitation, and none attempt it. Nobody reports trying and failing. Field is routing around it, not past it."
+    gap_id: G2
   - coords: {method: iterative retrieval, control: fixed retrieval recall, evaluation: 3+-hop}
     occupants: []
     state: undecided

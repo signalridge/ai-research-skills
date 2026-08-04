@@ -90,22 +90,50 @@ search, and the thing that would have found the counterexample was never run.
 
 ### G2 — Would closing it be a contribution?
 
-The hardest gate, and the one people skip. An empty cell has two explanations: nobody tried,
-or everybody tried and it did not matter.
+The hardest gate, and the one people skip. Reads `coverage.yml` — the cell's `state` and
+`trend_evidence`.
 
-Reads `coverage.yml` — the cell's `state` and `trend_evidence`.
+| Cell state | Score | Reading |
+|---|---|---|
+| `avoided` | 5 | The field names this as an open problem repeatedly and nobody attempts it. Every paper that listed it as future work is a citer waiting for the result. |
+| `unexplored`, live neighbourhood | 5 | Neighbouring cells are high-volume and still growing; the gap sits on the path of active work |
+| `unexplored`, thin neighbourhood | 3 | Nobody tried, but nobody is nearby either |
+| `undecided` | **cap at 3** | Emptiness was never explained. You cannot score contribution on an unexamined hole. |
+| `abandoned` | 1 | People tried and it did not hold up. Read the failure before considering repeating it. |
 
-| Score | Evidence |
-|---|---|
-| 5 | Cell is `unexplored`; neighbouring cells are high-volume and still growing; the gap sits on the path of active work |
-| 3 | Cell is `unexplored` but neighbours are thin, or the trend is flat |
-| 1 | Cell is `abandoned` — neighbours peaked years ago. Or the gap is real and nobody cares. |
+**`avoided` and `abandoned` both mean "the work stopped", and they score at opposite ends.**
+An old, large, acknowledged problem that everyone routes around is not evidence that nobody
+cares — usually the opposite. If `coverage.yml` does not distinguish them, send it back to
+`survey` Phase 4 Step C rather than guessing; guessing here is how the best gap in the grid
+gets scored 1 and discarded.
 
-A cell marked `undecided` in `coverage.yml` **caps G2 at 3**. You cannot score contribution
-on a cell whose emptiness was never explained.
+Then the question that actually decides it: *if I closed this, who cites it?* Name two
+groups from the corpus or score 2. For an `avoided` cell this is easy and the answer is
+already in `trend_evidence` — that is what makes the state worth so much.
 
-Ask the question that actually decides it: *if I closed this, who cites it?* If you cannot
-name two groups from the corpus, that is a 2.
+#### Shape probe — calibration, not a gate
+
+Four questions about what *kind* of contribution this is. **No score attaches.** Incremental
+work is the backbone of a research career and reaches top venues routinely; the probe exists
+so the framing matches the reality rather than to filter.
+
+1. **Hidden assumption.** Does closing this gap require the field to give up something it
+   currently takes for granted? A specific assumption, nameable in one sentence — not "we
+   use a better method."
+2. **Known and avoided.** Has the field been describing this problem for years without
+   attacking it? (If `coverage.yml` says `avoided`, this is already a yes and the evidence
+   is recorded.)
+3. **Newly possible.** Did some capability that did not exist two years ago make this
+   answerable now? A gap that was intractable and quietly became tractable is the highest
+   reward-to-risk shape available.
+4. **So what.** If this resolved itself overnight, would anything downstream actually
+   change? If nothing does, the gap may be real and still not worth closing.
+
+Two or more yes answers means the gap is structural rather than incremental. Say so in the
+dossier and frame it that way. Zero or one is fine — say *that*, and frame it as the solid
+incremental contribution it is. **The failure this catches is framing drift in both
+directions**: dressing an incremental gap as a paradigm shift invites a reviewer to
+puncture it, and burying a structural gap in incremental language wastes it.
 
 ### G3 — Can you close it?
 

@@ -5,7 +5,7 @@ A lean, guarded research skill suite for CS/ML. **One survey engine, four exits.
 Domain: CS / ML / AI. Weight: lean + guarded (~7 skills, 4 hooks, 6 commands).
 
 Revision 3 (2026-08-04) — adds a contrarian recall mode, a disqualifier gate before
-scoring, and shelf-life-versus-execution-window feasibility. See §9 for the full history
+scoring, shelf-life feasibility, and the `avoided` coverage state. See §9 for the full history
 and [CREDITS.md](CREDITS.md) for provenance and licensing.
 
 ---
@@ -360,7 +360,7 @@ Six, matching methodology reference 01. Everything else auto-triggers from descr
 
 ---
 
-## 5. The sixteen rules, and the failure each one traces to
+## 5. The seventeen rules, and the failure each one traces to
 
 methodology reference 01' discipline: no rule without a scar.
 
@@ -425,17 +425,25 @@ methodology reference 01' discipline: no rule without a scar.
     method detail, and "nothing retrieved under these keywords" is not "nothing exists."
     Both halves are routinely collapsed, and both collapses produce confident errors.
 
-14. **A gap is only taken if no axis differs.** ← A similar title establishes nothing.
+14. **`avoided` and `abandoned` are opposite states that look identical.** ← Both mean
+    "the work stopped." One is a dead end; the other is an old, large, acknowledged problem
+    the field routes around because it is hard — usually the best target on the grid. Until
+    revision 4 the coverage map had no way to express the difference, so `gap-gate` G2
+    scored both at 1 and would have systematically discarded the highest-value class of
+    gap. The discriminator is searchable: count papers naming it as future work without
+    attempting it.
+
+15. **A gap is only taken if no axis differs.** ← A similar title establishes nothing.
     Duplication is failing to find even one differing axis among object-acted-on,
     mechanism, input-granularity and problem-setting. The rule cuts both ways: if all four
     come up the same, record it and drop the gap rather than reaching for a fifth.
 
-15. **A gap has a shelf life, and it is a feasibility criterion.** ← An open, worthwhile,
+16. **A gap has a shelf life, and it is a feasibility criterion.** ← An open, worthwhile,
     technically reachable gap is still a no-go if it will close before you finish. Ten
     focused hours a week against a six-month shelf life is a deadline set by strangers.
     G3 compares the two explicitly.
 
-16. **The gate assembles evidence; the human renders the verdict.** ← From `gap-to-topic`.
+17. **The gate assembles evidence; the human renders the verdict.** ← From `gap-to-topic`.
     A go/no-go on months of your time is not a decision to delegate, and a confident
     machine verdict crowds out the judgment that should be doing the work.
 
@@ -514,7 +522,8 @@ A full survey round — ~20 searches plus a few hundred list/graph calls — cos
 ## 9. Changelog
 
 **Revision 3 (2026-08-04)** — after surveying methodology-reference-02 alongside a
-re-read of methodology reference 01 and ai-research-skills. Adopted:
+re-read of methodology reference 01 and ai-research-skills. The `avoided` state is the most consequential
+item: it corrects a rubric that would have discarded the best gaps. Adopted:
 
 | Change | Source |
 |---|---|
@@ -522,7 +531,9 @@ re-read of methodology reference 01 and ai-research-skills. Adopted:
 | `gap-gate` Gate 0 disqualifiers with short-circuit (rule 12) | methodology reference 02 `idea-evaluator` fatal-flaws-before-scoring |
 | Retrieval-bounds rule in Phase 2 (rule 13) | methodology reference 02 `idea-evaluator` novelty-grounding discipline |
 | `differing_axis` on `nearest_prior_work` (rule 14) | same |
-| G3 shelf life vs execution window (rule 15) | methodology reference 02 handbook §2.1 lifecycle/capability matching |
+| G3 shelf life vs execution window (rule 16) | methodology reference 02 handbook §2.1 lifecycle/capability matching |
+| `avoided` coverage state; G2 rubric corrected (rule 14) | methodology reference 02 paradigm-shift probe, "elephant in the room" |
+| G2 shape probe — four calibration questions, no score | same probe, kept as calibration because their own guidance is that it is not a gate |
 | Anchor scoring at 5 and justify movement | methodology reference 02 five-dimension scoring discipline |
 | `rs_validate` reports every schema violation, not the first | found while testing the above |
 | `found_via` accepted `watch:` — it did not, and `watch` already emitted it | found while testing the above |
