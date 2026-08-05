@@ -7,7 +7,6 @@ axes:
     values: [none, fixed token budget, fixed retrieval recall]
   - name: evaluation
     values: [2-hop, 3+-hop]
-
 cells:
   - coords: {method: iterative retrieval, control: fixed token budget, evaluation: 2-hop}
     occupants: [alpha2025iterative]
@@ -18,7 +17,6 @@ cells:
   - coords: {method: iterative retrieval, control: none, evaluation: 3+-hop}
     occupants: [gamma2026threehop]
     state: occupied
-
   # The gap. Empty, and discriminated — neighbours are live, so unexplored not abandoned.
   - coords: {method: iterative retrieval, control: fixed retrieval recall, evaluation: 2-hop}
     occupants: []
@@ -30,7 +28,6 @@ cells:
     state: unexplored
     trend_evidence: "Same neighbourhood as above; the long-context arm of the same missing comparison."
     gap_id: G1
-
   # `avoided`, not `abandoned` — the distinction that decides G2. Work here stopped, but
   # papers keep naming it as future work without attempting it. Scores 5, not 1.
   - coords: {method: long-context, control: none, evaluation: 3+-hop}
@@ -44,7 +41,10 @@ cells:
   - coords: {method: long-context, control: fixed retrieval recall, evaluation: 3+-hop}
     occupants: []
     state: undecided
-
 recall_diagnostic:
-  includes_by_mode: {keyword: 2, citation_chain: 1, venue_author: 1, contrarian: 1}
-  note: "All four modes contributed. beta2025longctx came only from the contrarian pass — keyword search used the mainstream vocabulary and the citation chains never reached it, because the papers it contradicts do not cite it. Dropping Mode D would have produced a survey reporting a consensus that does not exist."
+  # Counted over the three includes only; a record can be found by more than one mode, so
+  # these do not sum to the include count. venue_author surfaced epsilon2026workshop, which
+  # is `unsure` — counting it here as an include would overstate what that mode delivered.
+  includes_by_mode: {keyword: 2, citation_chain: 1, venue_author: 0, contrarian: 1}
+  unsure_by_mode: {venue_author: 1}
+  note: "All four modes contributed something, but only three contributed an include — venue_author's single hit is still unadjudicated. beta2025longctx came only from the contrarian pass: keyword search used the mainstream vocabulary and the citation chains never reached it, because the papers it contradicts do not cite it. Dropping Mode D would have produced a survey reporting a consensus that does not exist."

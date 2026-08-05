@@ -30,11 +30,11 @@ jobs:
         run: uv run --group dev python tests/run_tests.py
       - name: validator against the worked example
         run: |
-          uv run --group dev python scripts/rs_validate.py \
+          uv run --group dev python src/ai_research_skills/assets/scripts/rs_validate.py \
             examples/worked-survey/.research/survey/retrieval-augmented-agents
       - name: validator rejects the broken fixture
         run: |
-          if uv run --group dev python scripts/rs_validate.py tests/fixtures/broken-survey
+          if uv run --group dev python src/ai_research_skills/assets/scripts/rs_validate.py tests/fixtures/broken-survey
           then
             echo "::error::broken fixture passed validation — a check has regressed"
             exit 1
@@ -51,7 +51,7 @@ jobs:
           uv run --group dev python - <<'PY'
           import json, pathlib, sys, yaml
           bad = []
-          skip = {".git", ".venv", "node_modules", "__pycache__"}
+          skip = {".git", ".venv", "node_modules", "__pycache__", ".claude", "dist"}
           for pat, load in (("*.json", json.loads), ("*.yml", yaml.safe_load),
                             ("*.yaml", yaml.safe_load)):
               for p in pathlib.Path(".").rglob(pat):
@@ -66,7 +66,7 @@ jobs:
           uv run --group dev python - <<'PY'
           import pathlib, re, sys, yaml
           bad = []
-          for p in sorted(pathlib.Path(".claude/skills").glob("*/SKILL.md")):
+          for p in sorted(pathlib.Path("src/ai_research_skills/assets/skills").glob("*/SKILL.md")):
               m = re.match(r"^---\n(.*?)\n---", p.read_text(), re.S)
               if not m:
                   bad.append(f"{p}: no frontmatter"); continue
@@ -81,8 +81,8 @@ jobs:
           PY
       - name: ruff
         run: |
-          uv run --group dev ruff check .claude/hooks/ scripts/ tests/ install.py src/
-          uv run --group dev ruff format --check .claude/hooks/ scripts/ tests/ install.py src/
+          uv run --group dev ruff check src/ tests/ install.py
+          uv run --group dev ruff format --check src/ tests/ install.py
       - name: basedpyright
         run: uv run --group dev basedpyright
       # Relative links break when a file moves; the skills are worse, because they get
@@ -93,7 +93,7 @@ jobs:
           import pathlib, re, sys
           bad = []
           for p in pathlib.Path(".").rglob("*.md"):
-              if {".git", ".venv"} & set(p.parts): continue
+              if {".git", ".venv", ".claude", "dist"} & set(p.parts): continue
               for link in re.findall(r"\]\((?!https?:|#)([^)#]+)", p.read_text()):
                   if not (p.parent / link).exists():
                       bad.append(f"{p}: dead link -> {link}")
@@ -112,12 +112,12 @@ jobs:
         run: |
           uv build
           unzip -l dist/*.whl \
-            | grep "research_skills/assets/.claude/skills/rs-survey/SKILL.md"
+            | grep "ai_research_skills/assets/skills/ars-survey/SKILL.md"
       # Installing into a scratch project is the only test of the thing users actually run.
       - name: install into a scratch project
         run: |
           mkdir -p /tmp/scratch
-          uv run --with dist/*.whl research-skills install /tmp/scratch
-          uv run --with dist/*.whl research-skills doctor /tmp/scratch
-          test -f /tmp/scratch/.claude/skills/rs-survey/SKILL.md
+          uv run --with dist/*.whl ai-research-skills install /tmp/scratch
+          uv run --with dist/*.whl ai-research-skills doctor /tmp/scratch
+          test -f /tmp/scratch/.claude/skills/ars-survey/SKILL.md
           test -f /tmp/scratch/.claude/settings.json

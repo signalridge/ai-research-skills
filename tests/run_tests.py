@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Test suite for research-skills. Standard library only.
+"""Test suite for ai-research-skills. Standard library only.
 
     python3 tests/run_tests.py
     uv run --with pyyaml --with jsonschema python3 tests/run_tests.py  # + structural
@@ -28,10 +28,12 @@ import sys
 import tempfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-HOOKS = os.path.join(ROOT, ".claude", "hooks")
-SKILLS = os.path.join(ROOT, ".claude", "skills")
+PKG = os.path.join(ROOT, "src", "ai_research_skills")
+ASSETS = os.path.join(PKG, "assets")
+HOOKS = os.path.join(ASSETS, "hooks")
+SKILLS = os.path.join(ASSETS, "skills")
 INSTALL = os.path.join(ROOT, "install.py")
-VALIDATE = os.path.join(ROOT, "scripts", "rs_validate.py")
+VALIDATE = os.path.join(ASSETS, "scripts", "rs_validate.py")
 BROKEN = os.path.join(ROOT, "tests", "fixtures", "broken-survey")
 EXAMPLE = os.path.join(
     ROOT,
@@ -172,10 +174,43 @@ def test_hooks(tmp: str) -> None:
         f"outcome={outcome(out)}",
     )
 
-    with open(os.path.join(survey, "gaps.yml"), "w", encoding="utf-8") as fh:
+    # One phrasing is not evidence of absence. The guard must hold the same >=3 floor
+    # rs_validate does, or the author who slips through learns the rule wrong.
+    gaps_path = os.path.join(survey, "gaps.yml")
+    with open(gaps_path, "w", encoding="utf-8") as fh:
+        fh.write(
+            "gaps:\n  - id: G1\n    evidence_of_absence:\n      queries_run:\n"
+            "        - 'a'\n      venues_swept: ['ICLR@2026']\n"
+        )
+    rc, out, _ = run_hook("absence_claim_guard.py", prose)
+    check(
+        "absence: one query phrasing is not enough -> block",
+        rc == 0 and outcome(out) == "block",
+        f"outcome={outcome(out)}",
+    )
+
+    # Two gaps, one query each. Counting across the file instead of within one block
+    # would read this as three and let the claim through.
+    with open(gaps_path, "w", encoding="utf-8") as fh:
+        fh.write(
+            "gaps:\n"
+            "  - id: G1\n    evidence_of_absence:\n      queries_run:\n"
+            "        - 'a'\n      venues_swept: ['ICLR@2026']\n"
+            "  - id: G2\n    evidence_of_absence:\n      queries_run:\n"
+            "        - 'b'\n      venues_swept: ['NeurIPS@2025']\n"
+        )
+    rc, out, _ = run_hook("absence_claim_guard.py", prose)
+    check(
+        "absence: queries are counted per gap, not per file -> block",
+        rc == 0 and outcome(out) == "block",
+        f"outcome={outcome(out)}",
+    )
+
+    with open(gaps_path, "w", encoding="utf-8") as fh:
         fh.write(
             "gaps:\n  - id: G1\n    evidence_of_absence:\n      queries_run:\n"
             "        - 'a'\n        - 'b'\n        - 'c'\n"
+            "      venues_swept: ['ICLR@2026']\n"
         )
     rc, out, _ = run_hook("absence_claim_guard.py", prose)
     check(
@@ -386,7 +421,7 @@ def test_layout() -> None:
     skills = sorted(os.listdir(SKILLS))
     check("all seven skills present", len(skills) == 7, str(skills))
 
-    may_search = {"rs-survey", "rs-watch", "rs-red-team"}
+    may_search = {"ars-survey", "ars-watch", "ars-red-team"}
     for s in skills:
         p = os.path.join(SKILLS, s, "SKILL.md")
         head = re.match(r"^---\n(.*?)\n---", open(p, encoding="utf-8").read(), re.DOTALL)
@@ -413,7 +448,7 @@ def test_layout() -> None:
         check(f"{s}: declares handoffs", m is not None)
         if not m:
             continue
-        for ref in sorted(set(re.findall(r"rs-[a-z-]+", m.group(1))) - {s}):
+        for ref in sorted(set(re.findall(r"ars-[a-z-]+", m.group(1))) - {s}):
             check(f"{s}: handoff target {ref} exists", ref in skills, f"{ref} not a skill")
 
     # Progressive disclosure: every `references/*.md` link in a SKILL.md resolves to a
@@ -428,7 +463,7 @@ def test_layout() -> None:
                 os.path.isfile(os.path.join(SKILLS, s, rel)),
                 f"{s}/{rel} missing",
             )
-    refs_dir = os.path.join(SKILLS, "rs-survey", "references")
+    refs_dir = os.path.join(SKILLS, "ars-survey", "references")
     for f in sorted(os.listdir(refs_dir)):
         if not f.endswith(".md"):
             continue
@@ -437,8 +472,8 @@ def test_layout() -> None:
 
     commands = sorted(
         f
-        for f in os.listdir(os.path.join(ROOT, ".claude", "commands"))
-        if f.startswith("rs-") and f.endswith(".md")
+        for f in os.listdir(os.path.join(ASSETS, "commands"))
+        if f.startswith("ars-") and f.endswith(".md")
     )
     check("all seven commands present", len(commands) == 7, str(commands))
     check("install.py present", os.path.isfile(INSTALL))
@@ -475,11 +510,13 @@ def test_install(tmp: str) -> None:
     rc, out = run()
     check("install exits 0", rc == 0, out[-200:])
     landed = [
-        os.path.join(target, ".claude", "commands", "rs-survey.md"),
-        os.path.join(target, ".claude", "skills", "rs-survey", "SKILL.md"),
+        os.path.join(target, ".claude", "commands", "ars-survey.md"),
+        os.path.join(target, ".claude", "skills", "ars-survey", "SKILL.md"),
         os.path.join(target, ".claude", "hooks", "bib_provenance_guard.py"),
-        os.path.join(target, ".claude", "research-skills", "scripts", "rs_validate.py"),
-        os.path.join(target, ".claude", "research-skills", "schemas", "corpus.schema.json"),
+        os.path.join(target, ".claude", "ai-research-skills", "scripts", "rs_validate.py"),
+        os.path.join(
+            target, ".claude", "ai-research-skills", "schemas", "corpus.schema.json"
+        ),
     ]
     for path in landed:
         check(f"lands {os.path.relpath(path, target)}", os.path.isfile(path))
@@ -487,7 +524,7 @@ def test_install(tmp: str) -> None:
     # Derived, not hardcoded: each guard contributes one entry per if-condition, so a
     # new watched suffix changes the count and a literal here would go stale silently.
     sys.path.insert(0, os.path.join(ROOT, "src"))
-    from research_skills import installer
+    from ai_research_skills import installer
 
     expected_entries = sum(
         len(conditions) or 1 for *_rest, conditions in installer.HOOK_SPEC
@@ -542,7 +579,7 @@ def test_doctor(tmp: str) -> None:
 
     def run_doctor(target: str) -> tuple[int, str]:
         p = subprocess.run(
-            [sys.executable, "-m", "research_skills", "doctor", target],
+            [sys.executable, "-m", "ai_research_skills", "doctor", target],
             capture_output=True,
             text=True,
             env=env,
@@ -564,7 +601,7 @@ def test_doctor(tmp: str) -> None:
     )
     check(
         "doctor: empty project names the fix",
-        "research-skills install" in out,
+        "ai-research-skills install" in out,
         out[-300:],
     )
 
@@ -585,7 +622,7 @@ def test_hosts(tmp: str) -> None:
     which hosts can actually run the guardrails."""
     print("\nhosts")
     sys.path.insert(0, os.path.join(ROOT, "src"))
-    from research_skills import hosts
+    from ai_research_skills import hosts
 
     ids = hosts.known_ids()
     # Narrowed deliberately: a host earns a record by having a verified way to run the
@@ -619,24 +656,33 @@ def test_hosts(tmp: str) -> None:
     # The skills are authored against Claude Code's layout. Copied verbatim to another
     # host they tell the agent to run $CLAUDE_PROJECT_DIR/.claude/… — an undefined
     # variable and the wrong root, so the command silently resolves to nothing.
-    from research_skills import installer
+    from ai_research_skills import installer
 
     target = os.path.join(tmp, "paths")
     installer.install(target, "claude,codex")
-    claude_skill = pathlib.Path(target, ".claude/skills/rs-survey/SKILL.md").read_text()
-    codex_skill = pathlib.Path(target, ".codex/skills/rs-survey/SKILL.md").read_text()
+    claude_skill = pathlib.Path(target, ".claude/skills/ars-survey/SKILL.md").read_text()
+    codex_skill = pathlib.Path(target, ".codex/skills/ars-survey/SKILL.md").read_text()
     check(
         "claude keeps $CLAUDE_PROJECT_DIR",
-        "$CLAUDE_PROJECT_DIR/.claude/research-skills" in claude_skill,
+        "$CLAUDE_PROJECT_DIR/.claude/ai-research-skills" in claude_skill,
     )
     check(
         "non-claude host gets its own root",
-        ".codex/research-skills/scripts/rs_validate.py" in codex_skill,
+        ".codex/ai-research-skills/scripts/rs_validate.py" in codex_skill,
     )
-    check(
-        "non-claude host loses the Claude-only variable",
-        "CLAUDE_PROJECT_DIR" not in codex_skill,
-    )
+    # Two separate assertions because the earlier bug passed the first one: the schemas
+    # paragraph named `.claude/…` with no variable in front of it, so a check for the
+    # variable alone said the file was localised when a whole path was not. Sweep every
+    # installed markdown, not just the one skill that happens to invoke the validator.
+    for host_id, root in (("codex", ".codex"), ("cursor", ".cursor"), ("pi", ".pi")):
+        installer.install(target, host_id)
+        stray = [
+            f"{p.relative_to(target)}:{n}"
+            for p in pathlib.Path(target, root, "skills").rglob("*.md")
+            for n, line in enumerate(p.read_text().splitlines(), 1)
+            if ".claude" in line or "CLAUDE_PROJECT_DIR" in line
+        ]
+        check(f"{host_id}: no Claude-only path survives the install", not stray, str(stray))
     # The if-conditions are a pre-filter Claude Code evaluates before spawning the
     # guard. Too broad only wastes a process; too narrow silently disables the guard,
     # so the patterns are generated from the same suffix tuples the guards check.
@@ -667,7 +713,7 @@ def test_hosts(tmp: str) -> None:
             any(s in c for c in installer.HOOK_SPEC[1][4]) for s in installer.PROSE_SUFFIXES
         ),
     )
-    sys.path.insert(0, os.path.join(ROOT, ".claude/hooks"))
+    sys.path.insert(0, HOOKS)
     import _payload as _payload_mod
 
     # Codex writes through apply_patch and its condition syntax is unverified, so it
@@ -748,20 +794,47 @@ def test_hosts(tmp: str) -> None:
     )
 
     check(
-        "installing into the source checkout is a no-op, not a crash",
-        installer.install(ROOT, "claude") == 0,
-    )
-
-    check(
         "the rewritten path exists on disk",
         os.path.isfile(
-            os.path.join(target, ".codex/research-skills/scripts/rs_validate.py")
+            os.path.join(target, ".codex/ai-research-skills/scripts/rs_validate.py")
+        ),
+    )
+
+    # Upgrading a project that still carries the pre-v0.5 `rs-` names. Leaving them behind
+    # is not cosmetic: both generations match the same requests, so a stale copy stays
+    # live and the agent picks between them at random.
+    legacy = os.path.join(tmp, "legacy")
+    os.makedirs(os.path.join(legacy, ".claude/skills/rs-survey"))
+    os.makedirs(os.path.join(legacy, ".claude/commands"), exist_ok=True)
+    pathlib.Path(legacy, ".claude/skills/rs-survey/SKILL.md").write_text("stale\n")
+    pathlib.Path(legacy, ".claude/commands/rs-survey.md").write_text("stale\n")
+    installer.install(legacy, "claude")
+    check(
+        "install sweeps the legacy rs- skill",
+        not os.path.exists(os.path.join(legacy, ".claude/skills/rs-survey")),
+    )
+    check(
+        "install sweeps the legacy rs- command",
+        not os.path.exists(os.path.join(legacy, ".claude/commands/rs-survey.md")),
+    )
+    check(
+        "install still lands the ars- names",
+        os.path.isfile(os.path.join(legacy, ".claude/skills/ars-survey/SKILL.md"))
+        and os.path.isfile(os.path.join(legacy, ".claude/commands/ars-survey.md")),
+    )
+    # rs_validate.py keeps its name on purpose, and so does the rs-provenance header it
+    # writes — that marker is already in users' refs.bib files and is what the bib guard
+    # matches, so renaming it would fail every existing bibliography.
+    check(
+        "the validator keeps its rs_ name",
+        os.path.isfile(
+            os.path.join(legacy, ".claude/ai-research-skills/scripts/rs_validate.py")
         ),
     )
 
 
 def main() -> int:
-    print(f"research-skills tests  (python {sys.version.split()[0]})")
+    print(f"ai-research-skills tests  (python {sys.version.split()[0]})")
     try:
         import jsonschema  # noqa: F401
 

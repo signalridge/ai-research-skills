@@ -1,6 +1,6 @@
 # Setup — search backends
 
-The `rs-survey` skill routes across three backends (see [DESIGN.md §2.1](DESIGN.md)). This
+The `ars-survey` skill routes across three backends (see [DESIGN.md §2.1](DESIGN.md)). This
 file covers installing and verifying them, plus the failure modes each one has that produce
 **confident wrong answers rather than errors**.
 

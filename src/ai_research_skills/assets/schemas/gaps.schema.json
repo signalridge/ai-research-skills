@@ -1,0 +1,181 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/signalridge/ai-research-skills/schemas/gaps.schema.json",
+  "title": "Candidate gaps",
+  "description": "Absence as a typed claim. 'No one has done this' is the highest-risk sentence in research and the cheapest to say; this file is what makes it cost something.",
+  "type": "object",
+  "required": [
+    "gaps"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "gaps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "statement",
+          "type",
+          "evidence_of_absence",
+          "confidence",
+          "closes_if"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^G[0-9]+$"
+          },
+          "statement": {
+            "type": "string",
+            "minLength": 20,
+            "description": "What is missing, phrased as a testable claim \u2014 not as a topic."
+          },
+          "type": {
+            "enum": [
+              "method-limitation",
+              "untried-combination",
+              "unvalidated-comparison",
+              "missing-benchmark"
+            ]
+          },
+          "evidence_of_absence": {
+            "type": "object",
+            "required": [
+              "queries_run",
+              "venues_swept",
+              "last_checked"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "queries_run": {
+                "type": "array",
+                "minItems": 3,
+                "items": {
+                  "type": "string"
+                },
+                "description": "Verbatim. At least three DISTINCT phrasings \u2014 the same query reworded is one phrasing."
+              },
+              "venues_swept": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "@"
+                },
+                "description": "Format: VENUE@YEARS, e.g. ICLR@2025-2026"
+              },
+              "citation_chains": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Format: SEED:direction:depth, e.g. W2626778328:cites:1"
+              },
+              "nearest_prior_work": {
+                "type": "array",
+                "description": "The closest thing that exists, and precisely why it does not close the gap. A gap with no nearest prior work usually means the search was too narrow, not that the gap is wide open.",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "key",
+                    "why_not_it",
+                    "differing_axis"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "key": {
+                      "type": "string"
+                    },
+                    "why_not_it": {
+                      "type": "string",
+                      "minLength": 10
+                    },
+                    "differing_axis": {
+                      "enum": [
+                        "object-acted-on",
+                        "mechanism",
+                        "input-granularity",
+                        "problem-setting",
+                        "none"
+                      ],
+                      "description": "Which axis actually differs from the nearest prior work. A similar title never establishes duplication; duplication is failing to find even ONE differing axis. `none` means the gap is closed by this work \u2014 say so rather than reaching for a distinction."
+                    }
+                  }
+                }
+              },
+              "last_checked": {
+                "type": "string",
+                "format": "date"
+              }
+            }
+          },
+          "confidence": {
+            "enum": [
+              "high",
+              "medium",
+              "low"
+            ],
+            "description": "high requires >=3 phrasings, >=3 venue-years, and forward chains from the nearest prior work. Enforced by rs_validate."
+          },
+          "closes_if": {
+            "type": "string",
+            "minLength": 20,
+            "description": "The falsifier, written in advance. `ars-watch` re-tests this against every new paper. Without it a gap closes silently while you are six months into closing it yourself."
+          },
+          "verdict": {
+            "type": "object",
+            "description": "Written by gap-gate. Absent until the gate runs.",
+            "additionalProperties": false,
+            "properties": {
+              "g1_open": {
+                "$ref": "#/$defs/gate"
+              },
+              "g2_contribution": {
+                "$ref": "#/$defs/gate"
+              },
+              "g3_feasible": {
+                "$ref": "#/$defs/gate"
+              },
+              "composite": {
+                "enum": [
+                  "go",
+                  "conditional",
+                  "no-go"
+                ],
+                "description": "3-gate AND. Any gate failing makes this no-go. This is a summary of the evidence, NOT a recommendation \u2014 the worth-it call belongs to the researcher."
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "gate": {
+      "type": "object",
+      "required": [
+        "score",
+        "rationale"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "score": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 5
+        },
+        "rationale": {
+          "type": "string",
+          "minLength": 10
+        },
+        "risk": {
+          "type": "string"
+        },
+        "action_needed": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

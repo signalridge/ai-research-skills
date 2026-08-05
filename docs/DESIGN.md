@@ -1,13 +1,13 @@
-# research-skills — design
+# ai-research-skills — design
 
 A lean, guarded research skill suite for AI/ML. **One survey engine, four exits.**
 
 Domain: CS / ML / AI. Weight: lean + guarded (~7 skills, 4 hooks, 7 commands).
 
-Revision 3 (2026-08-04) — adds a contrarian recall mode, a disqualifier gate before
-scoring, shelf-life feasibility, and the `avoided` coverage state. See §9 for the full
-history. Ideas from other suites were re-expressed, not copied — methodology reference 02 is
-CC BY-NC-SA 4.0 and this repo is MIT.
+Revision 5 (2026-08-06) — a review pass over revision 4's distribution rework: four defects
+fixed and the skill prefix renamed `rs-` → `ars-`. See §10 for the full history. Ideas from
+other suites were re-expressed, not copied — methodology reference 02 is CC BY-NC-SA 4.0 and this
+repo is MIT.
 
 ---
 
@@ -43,7 +43,7 @@ durable, re-queryable artifact.
 ## 1. State — the spine
 
 Everything is a file. State survives context compaction, session restarts, and hand-off to
-a teammate. `rs-watch` is literally "re-run `protocol.yml`."
+a teammate. `ars-watch` is literally "re-run `protocol.yml`."
 
 ```
 .research/survey/<topic-slug>/
@@ -185,7 +185,7 @@ gaps:
 ```
 
 **`closes_if` is the load-bearing field.** It is a falsifier, written in advance, that
-`rs-watch` re-tests automatically on every new paper. Without it a gap closes silently while
+`ars-watch` re-tests automatically on every new paper. Without it a gap closes silently while
 you spend six months on it. This is the bridge between "survey" and "standing awareness",
 and it exists in none of the four surveyed repos — `gap-to-topic` gets closest with its 3
 gates but has no re-check mechanism.
@@ -196,15 +196,15 @@ gates but has no re-check mechanism.
 
 | # | Skill | Reads | Writes | One-line job |
 |---|---|---|---|---|
-| 1 | `rs-survey` | — | all of `.research/survey/<slug>/` | The only searcher. 6 phases. |
-| 2 | `rs-gap-gate` | coverage, gaps | `topic_dossier.md`, `.gaps.yml` verdicts | 3-gate go/no-go, **verdict withheld** |
-| 3 | `rs-related-work` | corpus, coverage | `related_work.md`, `refs.bib` | Thematic prose + verified BibTeX |
-| 4 | `rs-watch` | protocol, gaps | appends corpus, `digest.md` | Re-run protocol, diff, re-test `closes_if` |
-| 5 | `rs-decision-brief` | corpus | `brief.md` | Claim→evidence matrix, build/adopt/skip |
-| 6 | `rs-red-team` | everything | `challenge.md` | Adversarial pass at 2 checkpoints |
-| 7 | `rs-verify` | corpus, refs, drafts | `integrity.md` | Citation + number traceability |
+| 1 | `ars-survey` | — | all of `.research/survey/<slug>/` | The only searcher. 6 phases. |
+| 2 | `ars-gap-gate` | coverage, gaps | `topic_dossier.md`, `.gaps.yml` verdicts | 3-gate go/no-go, **verdict withheld** |
+| 3 | `ars-related-work` | corpus, coverage | `related_work.md`, `refs.bib` | Thematic prose + verified BibTeX |
+| 4 | `ars-watch` | protocol, gaps | appends corpus, `digest.md` | Re-run protocol, diff, re-test `closes_if` |
+| 5 | `ars-decision-brief` | corpus | `brief.md` | Claim→evidence matrix, build/adopt/skip |
+| 6 | `ars-red-team` | everything | `challenge.md` | Adversarial pass at 2 checkpoints |
+| 7 | `ars-verify` | corpus, refs, drafts | `integrity.md` | Citation + number traceability |
 
-### 2.1 `rs-survey` — six phases, six reference files
+### 2.1 `ars-survey` — six phases, six reference files
 
 Progressive disclosure, methodology reference 01 style: `SKILL.md` is a scannable table; each phase is a
 separate `references/0N-*.md` loaded only when that phase runs. (Progressive disclosure is
@@ -214,7 +214,7 @@ upfront, which is the problem Anthropic's *Code execution with MCP* post exists 
 | Phase | File | Gate to advance |
 |---|---|---|
 | 0 Scope | `00-scope.md` | Question is interrogative + answerable; taxonomy axes named **before** searching |
-| 1 Recall | `01-recall.md` | All three recall modes executed and logged |
+| 1 Recall | `01-recall.md` | All four recall modes executed and logged, contrarian included |
 | 2 Score | `02-score.md` | Every candidate has `relevance` + `contextual_summary`; screen by threshold |
 | 3 Extract | `03-extract.md` | Every include has `claim`, `axes`, `code`, `evidence_read`, sourced `numbers` |
 | 4 Map | `04-map.md` | Coverage matrix built; empty cells promoted to candidate gaps |
@@ -242,7 +242,7 @@ non-arXiv proceedings-only papers or industry reports, and note that document pa
 exactly where papers are hard: complex multi-line equations score <70% BLEU against
 document parser 02's >90%. document parser 01's strength is tables (table-extraction component TEDS >91%), not maths.
 
-### 2.2 `rs-gap-gate` — 3-gate AND, verdict withheld
+### 2.2 `ars-gap-gate` — 3-gate AND, verdict withheld
 
 Adapted from `methodology reference 04/gap-to-topic`, the best single idea in the four repos.
 
@@ -267,7 +267,7 @@ the composite agrees with its own gates, and each check is tagged `[inspection]`
 from the dossier) or `[attestation]` (the user confirms). Failures surface as corrections
 inside the affected section, never as a gate report.
 
-### 2.3 `rs-related-work` — thematic, never paper-by-paper
+### 2.3 `ars-related-work` — thematic, never paper-by-paper
 
 - Organized by **axis**, not chronologically and not one-paragraph-per-paper. (A
   paper-by-paper related work section is a reading list, not a synthesis.)
@@ -276,7 +276,7 @@ inside the affected section, never as a gate report.
 - Refuses to characterize a paper whose record is `evidence_read: abstract` beyond what an
   abstract supports. Contribution claims require `intro+method` minimum.
 
-### 2.4 `rs-watch` — the protocol *is* the subscription
+### 2.4 `ars-watch` — the protocol *is* the subscription
 
 Re-runs `protocol.yml`'s keyword queries with `since = last_searched_at`, re-runs forward
 citation chains from the top-k seeds, then does the thing that matters: **evaluates every
@@ -291,7 +291,7 @@ Backed by `arxiv.watch_topic` / `check_alerts` for the standing subscription and
 `openalex.get_citation_graph` for new citers of the seed set; `/loop` or a cron routine for
 cadence. Updates `last_searched_at` on every run, which silences the staleness hook.
 
-### 2.5 `rs-decision-brief` — build / adopt / skip
+### 2.5 `ars-decision-brief` — build / adopt / skip
 
 Not academic prose. A claim→evidence matrix for a technical call.
 
@@ -307,7 +307,7 @@ Not academic prose. A claim→evidence matrix for a technical call.
 `code.runs: verified` is weighted far above venue prestige. For an engineering decision, a
 reproduced arXiv preprint beats an unreproduced NeurIPS oral.
 
-### 2.6 `rs-red-team` — two blocking checkpoints
+### 2.6 `ars-red-team` — two blocking checkpoints
 
 ARS's devil's-advocate, cut from 3 checkpoints to 2 and given a CS/ML-specific attack list.
 
@@ -322,9 +322,9 @@ ARS's devil's-advocate, cut from 3 checkpoints to 2 and given a CS/ML-specific a
   abandoned? Cite the trend evidence.
 - *Abstract-only conclusions.* Any coverage-matrix cell filled from an abstract alone.
 
-**Checkpoint B — before an exit is delivered.** Attacks the specific exit: for `rs-gap-gate`,
-the strongest case that the gap is already closed; for `rs-related-work`, cherry-picking and
-uncited counter-evidence; for `rs-decision-brief`, the failure mode you're least prepared for.
+**Checkpoint B — before an exit is delivered.** Attacks the specific exit: for `ars-gap-gate`,
+the strongest case that the gap is already closed; for `ars-related-work`, cherry-picking and
+uncited counter-evidence; for `ars-decision-brief`, the failure mode you're least prepared for.
 
 Critical findings block. Revision loops **capped at 2** — leftovers become an explicit
 "Acknowledged Limitations" section rather than looping forever. (Straight from ARS; it's
@@ -336,7 +336,7 @@ unfalsifiable scored *below* broken — a claim you cannot imagine being wrong a
 you have stopped examining. No hardening, no resilience score: surviving red-teaming is a
 list of attacks that failed, not a grade.
 
-### 2.7 `rs-verify` — citation and number integrity
+### 2.7 `ars-verify` — citation and number integrity
 
 - Every `refs.bib` entry resolves to a real record and was tool-generated.
 - Every number quoted in a draft traces to a `numbers[]` entry with a `source` and
@@ -352,27 +352,45 @@ list of attacks that failed, not a grade.
 methodology reference 01' central lesson: **prompts are advisory, hooks are enforcement.** Four, each
 traceable to a specific failure.
 
-| Hook | Event | Catches |
-|---|---|---|
-| `bib_provenance_guard` | PreToolUse `Edit\|Write` on `*.bib`, `*.tex` | Hand-written BibTeX. Requires provenance from `export_citations`/Crossref. **Fabricated citations are the #1 research failure mode of LLM assistance, and this closes it at the source rather than detecting it later.** |
-| `absence_claim_guard` | PostToolUse `Edit\|Write` on `*.md`, `*.tex` | Regex for `no prior work`, `first to`, `to the best of our knowledge`, `has not been`, `unexplored`, `novel` → demands a matching `gaps.yml` entry with populated `evidence_of_absence`. **The signature guardrail of this design.** |
-| `survey_staleness` | SessionStart + PreToolUse on exit skills | `last_searched_at` older than 30 days while writing a gap claim or related work. In a topic growing 3× a year, a six-week-old survey is a liability. |
-| `stop_survey_peer` | Stop | Fresh-context peer re-reads the session's conclusions against `corpus.jsonl`. One question: *is any conclusion here resting on `evidence_read: abstract`, on an unadjudicated tail, or on a coverage cell with no occupant and no evidence-of-absence?* |
+| Hook | Event | Verdict | Catches |
+|---|---|---|---|
+| `bib_provenance_guard` | PreToolUse on writes to `*.bib` | **denies** | Hand-written BibTeX: a `.bib` gaining entries with no tool-provenance header. **Fabricated citations are the #1 research failure mode of LLM assistance, and this closes it at the source rather than detecting it later.** |
+| `absence_claim_guard` | PostToolUse on writes to `*.md`, `*.tex`, `*.markdown`, `*.mdx` | objects | Regex for `no prior work`, `first to …`, `to the best of our knowledge`, `has not been …`, `remains unexplored`, `no one has`, plus CJK equivalents → demands a `gaps.yml` entry whose `evidence_of_absence.queries_run` carries ≥3 phrasings. **The signature guardrail of this design.** |
+| `survey_staleness` | SessionStart | advisory | `last_searched_at` older than 30 days on any survey in the project. In a topic growing 3× a year, a six-week-old survey is a liability. |
+| `stop_survey_peer` | Stop | advisory | Reads `corpus.jsonl` deterministically at end of turn: abstract-only includes, an unadjudicated tail, single-mode recall, gaps with no nearest prior work, zero corroboration on a deeply-read corpus. |
+
+Two limits are worth stating plainly, because a guardrail believed to be stronger than it
+is does more harm than one known to be weak:
+
+- **The absence guard is project-scoped, not claim-matched.** No regex can tell which gap a
+  given sentence rests on, so it answers the weaker question honestly — does this project
+  contain an absence claim worked out to the standard — and names the gap to check rather
+  than pretending to have found it.
+- **`stop_survey_peer` is not a peer.** It is a deterministic read of state, not a
+  fresh-context model re-reading the session's conclusions. It can tell you what the corpus
+  rests on; it cannot tell you what you concluded from it. `ars-red-team` is the place a
+  genuinely independent context earns its cost.
 
 ---
 
-## 4. Commands (6)
+## 4. Commands (7)
 
 ```
-/rs-survey <topic>    start or resume a survey (auto-detects phase from state)
-/rs-gate              3-gate go/no-go dossier
-/rs-relwork           related-work draft + verified bib
-/rs-brief             build/adopt/skip decision brief
-/rs-watch [arm|check] arm the subscription, or run a digest
-/rs-audit             red-team + verify in one pass
+/ars-survey <topic>    start or resume a survey (auto-detects phase from state)
+/ars-gate              3-gate go/no-go dossier
+/ars-relwork           related-work draft + verified bib
+/ars-brief             build/adopt/skip decision brief
+/ars-watch [arm|check] arm the subscription, or run a digest
+/ars-audit             red-team + verify in one pass
+/ars-help              where you are in a survey right now
 ```
 
-Six, matching methodology reference 01. Everything else auto-triggers from description matching.
+Seven. Everything else auto-triggers from description matching.
+
+Slash commands are a **Claude Code surface only** — it is the sole host in §9 with a
+`commands_dir`. On the other four the same skills install and trigger from their
+descriptions, or by name ("run `ars-survey` on X"), and the installer says so per host
+rather than announcing seven commands it did not write.
 
 ---
 
@@ -385,7 +403,7 @@ methodology reference 01' discipline: no rule without a scar.
    faster than it standardizes. But the deeper problem is that the first three modes are all
    biased toward *consensus*: keyword search returns the field's own vocabulary, citation
    chains follow what authors chose to acknowledge, venue sweeps return what got accepted. A
-   paper refuting the mainstream shares none of those. Without a contrarian pass, `rs-red-team`'s
+   paper refuting the mainstream shares none of those. Without a contrarian pass, `ars-red-team`'s
    cherry-picking check passes vacuously — it can only find contradictions already in the
    corpus — and the survey reports a consensus manufactured by its own search strategy.
 2. **`evidence_read` on every record.** ← Surveys confidently built on abstracts. An
@@ -409,7 +427,7 @@ methodology reference 01' discipline: no rule without a scar.
    field, because two different things hide inside "new": a paper published *before*
    `protocol.created` that you missed is a **recall failure**, fixable by another round; a
    paper published *after* it did not exist when you started and is **field growth**,
-   fixable only by `rs-watch`. Conflate them and a field growing 3× a year never converges —
+   fixable only by `ars-watch`. Conflate them and a field growing 3× a year never converges —
    you search forever chasing publications that are simply appearing. Measure the ratio over
    the first population only; take the growth rate from `analyze_trends` to size the watch
    interval and the survey's shelf life, not the stop rule.
@@ -421,7 +439,7 @@ methodology reference 01' discipline: no rule without a scar.
    sentence in research, and the cheapest to say. `confidence: high` requires ≥3 phrasings,
    ≥3 venue-years swept, and forward chains from the nearest prior work.
 9. **Every gap carries a `closes_if` falsifier.** ← Gaps close silently. Without a
-   pre-registered falsifier there is nothing for `rs-watch` to test, and you find out at
+   pre-registered falsifier there is nothing for `ars-watch` to test, and you find out at
    submission.
 10. **Extraction is open-response; never a checkbox.** ← literature benchmark v2's whole difficulty jump
     over literature benchmark (−26% to −46%) comes from replacing multiple choice with open answers.
@@ -433,7 +451,7 @@ methodology reference 01' discipline: no rule without a scar.
     hook and experiment-generation benchmark added a VLM figure-review loop. Three systems converged here.
 12. **Disqualify before scoring.** ← A careful three-gate assessment of a candidate that
     was dead on arrival is not thoroughness; it is decoration on a rejection, and it
-    manufactures a document that *looks* considered. `rs-gap-gate` Gate 0 reads state it
+    manufactures a document that *looks* considered. `ars-gap-gate` Gate 0 reads state it
     already has, and stops.
 
 13. **Retrieval bounds what you may conclude from it.** ← A search snippet establishes that
@@ -444,7 +462,7 @@ methodology reference 01' discipline: no rule without a scar.
 14. **`avoided` and `abandoned` are opposite states that look identical.** ← Both mean
     "the work stopped." One is a dead end; the other is an old, large, acknowledged problem
     the field routes around because it is hard — usually the best target on the grid. Until
-    revision 4 the coverage map had no way to express the difference, so `rs-gap-gate` G2
+    revision 3 the coverage map had no way to express the difference, so `ars-gap-gate` G2
     scored both at 1 and would have systematically discarded the highest-value class of
     gap. The discriminator is searchable: count papers naming it as future work without
     attempting it.
@@ -475,7 +493,7 @@ methodology reference 01' discipline: no rule without a scar.
   arxiv + OpenAlex MCPs already cover search, citation graphs, targeted section reads,
   authoritative BibTeX, coverage histograms, and standing alerts.
 - **A 13-agent team for the survey.** Lean means the survey is phases-in-one-context with
-  state on disk, not a fan-out. `rs-red-team` is the one place a genuinely independent context
+  state on disk, not a fan-out. `ars-red-team` is the one place a genuinely independent context
   earns its cost.
 - **PRISMA compliance.** Right for biomedical, wrong here. The counts and the screening log
   are kept (they're just good practice); the formal apparatus is not.
@@ -497,23 +515,23 @@ Each step is independently useful — stop anywhere and you have something that 
 
 | Step | Ship | Unlocks |
 |---|---|---|
-| 1 | `rs-survey` phases 0–4 + state schemas | A real corpus you can query and hand off |
+| 1 | `ars-survey` phases 0–4 + state schemas | A real corpus you can query and hand off |
 | 2 | `bib_provenance_guard` + `absence_claim_guard` | The two failures that actually cost you |
-| 3 | `rs-gap-gate` | Go/no-go — highest-leverage exit |
-| 4 | `rs-red-team` checkpoint A | Recall self-diagnostic; the survey starts checking itself |
-| 5 | `rs-watch` + `closes_if` re-testing | Standing awareness; survey becomes durable |
-| 6 | `rs-related-work` + `rs-verify` | Manuscript path |
-| 7 | `rs-decision-brief`, `stop_survey_peer`, `survey_staleness` | Engineering path + the long tail |
+| 3 | `ars-gap-gate` | Go/no-go — highest-leverage exit |
+| 4 | `ars-red-team` checkpoint A | Recall self-diagnostic; the survey starts checking itself |
+| 5 | `ars-watch` + `closes_if` re-testing | Standing awareness; survey becomes durable |
+| 6 | `ars-related-work` + `ars-verify` | Manuscript path |
+| 7 | `ars-decision-brief`, `stop_survey_peer`, `survey_staleness` | Engineering path + the long tail |
 
 Steps 1–3 are the minimum viable suite. Step 5 is what makes the whole thing compound:
-once gaps carry falsifiers and `rs-watch` re-tests them, the survey stops being a document you
+once gaps carry falsifiers and `ars-watch` re-tests them, the survey stops being a document you
 wrote once and becomes a position you hold.
 
 ---
 
 ## 8. OpenAlex — budget and hazards
 
-OpenAlex is **metered** as of 2026-02-13. This shapes how `rs-survey` is allowed to query it.
+OpenAlex is **metered** as of 2026-02-13. This shapes how `ars-survey` is allowed to query it.
 Setup and verified failure modes are in [SETUP.md](SETUP.md); the design consequences:
 
 **Pricing per 1,000 calls** — singleton (get by ID/DOI): **free** · list+filter: $0.10 ·
@@ -535,7 +553,57 @@ A full survey round — ~20 searches plus a few hundred list/graph calls — cos
 
 ---
 
-## 9. Changelog
+## 9. Hosts — where this can actually run
+
+Revision 4's distribution rework. The suite installs into five agent hosts, and the
+selection rule is the same one §3 rests on: **a host earns a record by having a verified
+way to enforce, not merely to read.**
+
+| Host | Skills | Commands | Guardrails | Config written |
+|---|---|---|---|---|
+| claude | `.claude/skills` | `.claude/commands` | yes | `.claude/settings.json` |
+| codex | `.codex/skills` | — | yes | `.codex/hooks.json` (events at top level) |
+| cursor | `.cursor/skills` | — | yes | `.cursor/hooks.json` (camelCase events, `version` required) |
+| pi | `.pi/skills` | — | yes\* | `.pi/settings.json` |
+| kimi | `.kimi/skills` | — | no | — |
+
+\* inert until `pi install npm:@hsingjui/pi-hooks`; the installer says so at install time
+rather than letting an inert config read as protection.
+
+Three consequences worth stating, because each one fails silently:
+
+1. **Skills-only adapters were removed, not shipped.** Six hosts (qwen, opencode, windsurf,
+   kilo, kiro, copilot) previously received the methodology with none of the enforcement.
+   That hands the user a false sense of protection, which is worse than not installing —
+   the whole design rests on rule 7 and rule 8 being *enforced*, not advised.
+2. **Paths are rewritten per host, not authored per host.** Skills are written against
+   Claude Code's layout — `$CLAUDE_PROJECT_DIR`, `.claude/` — and `installer.localise`
+   rewrites both forms on the way in. A missed rewrite points the agent at a directory
+   the host does not have, and nothing reports it, so the test suite asserts that no
+   Claude-only path survives an install to any other host.
+3. **`disallowed-tools` is a Claude Code extension, not part of the Agent Skills
+   standard.** The four read-only exits declare it so that "never search here" is
+   structural rather than advisory — but only on Claude Code, and only for the turn that
+   invokes the skill; the restriction clears on the user's next message. Everywhere else
+   it is ignored. That is why the prose rule stays in every one of those skills as the
+   real backstop, and why it is not counted as a guardrail in the table above.
+
+---
+
+## 10. Changelog
+
+**Revision 5 (2026-08-06)** — a full review pass. No new methodology; four defects and a
+prefix rename.
+
+| Change | Why |
+|---|---|
+| Skills and commands renamed `rs-` → `ars-` | `rs-` was short for `research-skills`, the name this repo carried before it became `ai-research-skills`. Skill and command names share one flat namespace per project, so the prefix has to be distinctive and has to trace back to the thing that installed it. `rs_validate.py` and the `rs-provenance` header are **not** renamed: the header is a file-format marker already written into users' `refs.bib` files and matched by `bib_provenance_guard`, so renaming it would fail every existing bibliography. Install and uninstall now sweep the old names, because two generations of the same skill both stay live and match the same requests |
+| `installer.localise` rewrites bare `.claude/…` paths, not just the `$CLAUDE_PROJECT_DIR`-qualified one | The schemas paragraph in `ars-survey` named `.claude/` with no variable in front of it and so survived the rewrite verbatim, telling a Codex agent to read a directory that host does not have. The test suite now asserts no Claude-only path survives an install to any other host, rather than checking one known string |
+| Install reports commands per host | Every host was told about seven slash commands, but only Claude Code has a `commands_dir`. The Kimi caveat compounded it by naming `/rs-audit` — a command that host never receives — inside the one message whose job is to say what you did not get |
+| `absence_claim_guard` holds the same ≥3-phrasing floor as `rs_validate` | It accepted one `queries_run` item anywhere in the project. A guard laxer than the rule it enforces teaches the rule wrong, because the author who gets through learns that one phrasing was enough. Queries are now counted within a single `evidence_of_absence`, not pooled across the file |
+| `rs_validate` names the state a cell actually carries | An `avoided` cell missing `trend_evidence` was told it was marked `unexplored`. The two score at opposite ends of G2, so the message pointed the fix at the wrong field |
+| §9 Hosts added; §3 hook table corrected | The hook table claimed a `.tex` matcher, a `novel` pattern, a `PreToolUse` staleness event and a "fresh-context peer" — none of which exist. Revision 4's headline change (multi-host distribution) had no section at all |
+| `unsure_by_mode` on `coverage.recall_diagnostic` | The worked example credited `venue_author` with an include that was actually `unsure`. A mode whose only hits are unresolved did contribute recall, and that is a different situation from one that contributed nothing |
 
 **Revision 4 (2026-08-04)** — distribution rework plus a second survey round over
 methodology reference 06, methodology reference 07 and methodology reference 05, and a fresh
@@ -546,16 +614,16 @@ re-read of the six original sources. Adopted:
 | `.claude/` layout + `install.py` (skills/commands/hooks install into a project's `.claude/`, hooks merged into `settings.json`); plugin distribution dropped | host distribution reference's layout |
 | Skills and commands `rs-`-prefixed; commands flat under `.claude/commands/` | host distribution reference's `golang-` prefix convention |
 | AI venue universe + default arXiv category set + AI taxonomy axes; Hugging Face routed as a first-class source | orientation, not a source |
-| `rs-red-team` truth-seeking verdicts (three buckets, refutation-conditions, no hardening) | methodology reference 06 falsification-first skills |
+| `ars-red-team` truth-seeking verdicts (three buckets, refutation-conditions, no hardening) | methodology reference 06 falsification-first skills |
 | `## Handoffs` contracts + closure check in `run_tests.py` | methodology reference 05 handoff sections; methodology reference 09's dependency closure verifier |
 | `corroboration` on corpus records | methodology reference 05 claim-level confidence metadata |
 | Source trust ranking; abstract-only never supports a conclusion; conditional outputs (intake note over thin section) | methodology reference 07 research-contract |
-| `rs-gap-gate` integrity gate with [inspection]/[attestation] classes, run silently | methodology reference 02 idea-evaluator / pre-submission-reviewer integrity gates — missed on the first read |
+| `ars-gap-gate` integrity gate with [inspection]/[attestation] classes, run silently | methodology reference 02 idea-evaluator / pre-submission-reviewer integrity gates — missed on the first read |
 | Opening-type classification (method-limitation vs unoccupied-application) shaping the kill test | methodology reference 04 gap-to-topic §0 — missed on the first read |
 | Count reconciliation in Phase 1 (expected vs retrieved, reported page size) | scientific skills catalog paper-lookup pagination discipline |
 | `revivable_by` on `abandoned` cells — a failure attributed to a specific tool, with a documented successor in the corpus, is promotable; the "newly possible" shape was being filtered out before it could become a gap | methodology reference 02 paradigm-shift probe, second read |
 | Step B/C misclassification filters — "X fails, therefore we propose Y" is an attempt, not a verdict; temporal silence needs a success-paper check before `abandoned` | methodology reference 07 research-contract source criticism |
-| `rs-verify` splits `unresolved` from `unverifiable-now`; `rs-watch` refreshes `last_checked` only on answered zero-hit queries — an infrastructure hiccup never manufactures freshness or deletes a citation | methodology reference 09 failure taxonomy: infrastructure failure is not claim failure |
+| `ars-verify` splits `unresolved` from `unverifiable-now`; `ars-watch` refreshes `last_checked` only on answered zero-hit queries — an infrastructure hiccup never manufactures freshness or deletes a citation | methodology reference 09 failure taxonomy: infrastructure failure is not claim failure |
 | Retrieved-content-is-untrusted discipline in Phase 1, pointed back to from Phase 3 extraction | prompt-injection posture across the agent repos |
 | Layout test pins progressive disclosure: every `references/` link resolves, exactly one level deep | methodology reference 09 dependency-closure verifier, extended to references |
 | Wording ladder anchored on `corroboration`; survey records support field-level statements only; ≥2-papers-per-paragraph weaving; "not reported" table cells; bounded absence claims; dated time words | methodology reference 07 research-contract claim calibration |
@@ -576,13 +644,13 @@ the cache).
 
 
 **Revision 3 (2026-08-04)** — after surveying methodology-reference-02 alongside a
-re-read of methodology reference 01 and ai-research-skills. The `avoided` state is the most consequential
+re-read of methodology reference 01 and the original research-skills reference. The `avoided` state is the most consequential
 item: it corrects a rubric that would have discarded the best gaps. Adopted:
 
 | Change | Source |
 |---|---|
 | Mode D contrarian recall; rule 1 now four modes | methodology reference 02 `deep-research` adversarial search perspectives |
-| `rs-gap-gate` Gate 0 disqualifiers with short-circuit (rule 12) | methodology reference 02 `idea-evaluator` fatal-flaws-before-scoring |
+| `ars-gap-gate` Gate 0 disqualifiers with short-circuit (rule 12) | methodology reference 02 `idea-evaluator` fatal-flaws-before-scoring |
 | Retrieval-bounds rule in Phase 2 (rule 13) | methodology reference 02 `idea-evaluator` novelty-grounding discipline |
 | `differing_axis` on `nearest_prior_work` (rule 14) | same |
 | G3 shelf life vs execution window (rule 16) | methodology reference 02 handbook §2.1 lifecycle/capability matching |
@@ -590,7 +658,7 @@ item: it corrects a rubric that would have discarded the best gaps. Adopted:
 | G2 shape probe — four calibration questions, no score | same probe, kept as calibration because their own guidance is that it is not a gate |
 | Anchor scoring at 5 and justify movement | methodology reference 02 five-dimension scoring discipline |
 | `rs_validate` reports every schema violation, not the first | found while testing the above |
-| `found_via` accepted `watch:` — it did not, and `rs-watch` already emitted it | found while testing the above |
+| `found_via` accepted `watch:` — it did not, and `ars-watch` already emitted it | found while testing the above |
 
 Nothing was copied. methodology reference 02 is CC BY-NC-SA 4.0 and this repo is MIT, so every
 idea taken from it was re-expressed against this suite's own state model and terminology.
