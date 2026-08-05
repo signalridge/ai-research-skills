@@ -42,6 +42,15 @@ class Host:
 
     aliases: tuple[str, ...] = field(default_factory=tuple)
 
+    invocation_dir: str | None = None
+    """Hosts that do not make a skills/ directory directly callable need a thin file
+    here that points back at the SKILL.md. Formats differ; see `include`."""
+
+    include: str = "@{path}"
+    """How the invocation file references the skill body. Kiro uses its own syntax."""
+
+    invocation_suffix: str = ".md"
+
 
 NO_GUARDS = (
     "skills only — no guardrails. Fabricated BibTeX and unsupported absence claims "
@@ -74,6 +83,57 @@ HOSTS: tuple[Host, ...] = (
         # Verified against ~/.cursor/hooks.json: beforeSubmitPrompt, stop, sessionEnd.
         # None of them carry a file path, so the write-time guards cannot be attached.
         caveat=NO_GUARDS + " Cursor has no file-write hook event to attach them to.",
+    ),
+    Host(
+        id="qwen",
+        skills_dir=".qwen/skills",
+        ownership_root=".qwen",
+        detect_paths=(".qwen",),
+        caveat=NO_GUARDS,
+    ),
+    Host(
+        id="opencode",
+        skills_dir=".opencode/skills",
+        ownership_root=".opencode",
+        detect_paths=(".opencode",),
+        invocation_dir=".opencode/command",
+        caveat=NO_GUARDS,
+    ),
+    Host(
+        id="windsurf",
+        skills_dir=".windsurf/skills",
+        ownership_root=".windsurf",
+        detect_paths=(".windsurf",),
+        invocation_dir=".windsurf/workflows",
+        caveat=NO_GUARDS,
+    ),
+    Host(
+        id="kilo",
+        skills_dir=".kilocode/skills",
+        ownership_root=".kilocode",
+        detect_paths=(".kilo", ".kilocode"),
+        invocation_dir=".kilo/commands",
+        caveat=NO_GUARDS,
+        aliases=("kilocode",),
+    ),
+    Host(
+        id="kiro",
+        skills_dir=".kiro/skills",
+        ownership_root=".kiro",
+        detect_paths=(".kiro",),
+        invocation_dir=".kiro/steering",
+        include="#[[file:{path}]]",
+        caveat=NO_GUARDS,
+    ),
+    Host(
+        id="copilot",
+        # Copilot has no skills concept; each capability is one self-contained agent file.
+        skills_dir=".github/skills",
+        ownership_root=".github/copilot",
+        detect_paths=(".github/agents", ".github/copilot", ".github/prompts"),
+        invocation_dir=".github/agents",
+        invocation_suffix=".agent.md",
+        caveat=NO_GUARDS,
     ),
     Host(
         id="pi",

@@ -576,10 +576,31 @@ def test_hosts(tmp: str) -> None:
 
     ids = hosts.known_ids()
     check(
-        "registry covers the five agents",
-        set(ids) >= {"claude", "codex", "cursor", "pi", "kimi"},
+        "registry covers the eleven agents",
+        set(ids)
+        >= {
+            "claude",
+            "codex",
+            "cursor",
+            "pi",
+            "kimi",
+            "qwen",
+            "opencode",
+            "windsurf",
+            "kilo",
+            "kiro",
+            "copilot",
+        },
         str(ids),
     )
+    # A stub that points at a path the installer never writes is a silent dead end.
+    for host in hosts.HOSTS:
+        if host.invocation_dir:
+            check(
+                f"{host.id}: include syntax carries the path",
+                "{path}" in host.include,
+                host.include,
+            )
     kimi = hosts.lookup("kimi-code")
     check("kimi-code resolves to kimi", kimi is not None and kimi.id == "kimi")
     check("unknown host resolves to None", hosts.lookup("nonesuch") is None)

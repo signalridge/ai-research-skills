@@ -28,9 +28,11 @@ Into any project you want to run a survey in:
 uvx --from ~/ghq/github.com/signalridge/research-skills research-skills install .
 ```
 
-It installs into whichever agents the project already uses — `.claude/`, `.codex/`,
-`.cursor/`, `.pi/`, `.kimi/` — or Claude Code if it uses none. Scope it with
-`--host claude,codex`. `uninstall` removes only what it wrote and leaves hooks you
+It installs into whichever agents the project already uses — **claude, codex, cursor,
+qwen, opencode, windsurf, kilo, kiro, copilot, pi, kimi** — or Claude Code if it uses
+none. Scope it with `--host claude,codex`. Hosts whose skills directory is not directly
+callable also get a thin invocation file (`.windsurf/workflows/`, `.kiro/steering/`,
+`.github/agents/`, …) pointing back at the skill. `uninstall` removes only what it wrote and leaves hooks you
 added yourself alone; `doctor` checks each host item by item.
 
 **Skills port everywhere; the guardrails do not.** They need a hook that fires before
