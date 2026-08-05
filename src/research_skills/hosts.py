@@ -32,7 +32,23 @@ class Host:
     """If any of these exist in a project, the project uses this host."""
 
     hooks: bool = False
-    """Whether the four guardrails can be wired up. Only Claude Code today."""
+    """Whether the four guardrails can be wired up."""
+
+    hooks_file: str = "settings.json"
+    """Where the host reads hook config from, relative to ownership_root. Claude Code
+    nests them under a `hooks` key in settings.json; Codex reads a bare hooks.json."""
+
+    hooks_nested: bool = True
+    """True when the config wraps the events in a top-level `hooks` object."""
+
+    write_tools: tuple[str, ...] = ()
+    """Tool names this host uses for file writes, for the hook matcher. Empty means
+    fall back to matching every tool — correct, just less efficient."""
+
+    filter_conditions: bool = False
+    """Whether to emit `if` pre-filters. Only where BOTH the tool names and the
+    condition syntax are verified: a condition that never matches silently disables the
+    guard, which is strictly worse than spawning a process that exits immediately."""
 
     commands_dir: str | None = None
     """Slash-command surface, if the host has one distinct from skills."""
@@ -65,15 +81,28 @@ HOSTS: tuple[Host, ...] = (
         ownership_root=".claude",
         detect_paths=(".claude",),
         hooks=True,
+        write_tools=("Write", "Edit"),
+        filter_conditions=True,
     ),
     Host(
         id="codex",
         skills_dir=".codex/skills",
         ownership_root=".codex",
         detect_paths=(".codex",),
-        # Codex has hooks in config.toml since v0.124.0, but the payload contract
-        # differs from Claude Code's. Porting the guards is tracked, not done.
-        caveat=NO_GUARDS + " Codex hooks exist but use a different contract.",
+        # Codex reads project hooks from .codex/hooks.json and uses the same event
+        # names and the same hookSpecificOutput.permissionDecision deny schema as
+        # Claude Code, so the guards run unmodified. The difference is the write
+        # payload: Codex routes writes through apply_patch, whose tool_input carries a
+        # patch body rather than a file_path. hooks/_payload.py reads both shapes.
+        hooks=True,
+        hooks_file="hooks.json",
+        hooks_nested=False,
+        # Codex writes through apply_patch, so Write(...)/Edit(...) conditions would
+        # never match and would turn the guards off without saying so. Whether Codex
+        # accepts Claude's permission-rule condition syntax at all is unverified, so
+        # it gets no pre-filter: the guards run on every tool call and check the
+        # suffix themselves, which is what they did before the filter existed.
+        write_tools=("apply_patch", "Write", "Edit"),
     ),
     Host(
         id="cursor",

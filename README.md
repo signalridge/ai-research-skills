@@ -35,11 +35,13 @@ callable also get a thin invocation file (`.windsurf/workflows/`, `.kiro/steerin
 `.github/agents/`, …) pointing back at the skill. `uninstall` removes only what it wrote and leaves hooks you
 added yourself alone; `doctor` checks each host item by item.
 
-**Skills port everywhere; the guardrails do not.** They need a hook that fires before
-a file is written, with the path in the payload. Only Claude Code has one — Cursor's
-hook set has no file-write event at all. On every other host you get the methodology
-without the enforcement, and the installer says so rather than letting you assume
-otherwise.
+**Skills port everywhere; the guardrails reach two hosts.** They need an event that
+fires before a file is written and a way to deny it. Claude Code and Codex both have
+one and share the deny schema, so the guards run unmodified on both — Claude reads
+`.claude/settings.json`, Codex reads `.codex/hooks.json`, and each is written for you.
+Cursor's hook set has no file-write event at all. On the remaining hosts you get the
+methodology without the enforcement, and the installer says so rather than letting you
+assume otherwise.
 
 Search backends are configured separately — see **[docs/SETUP.md](docs/SETUP.md)**. The
 `arxiv` MCP server is required; `openalex` and `tavily` are strongly recommended.

@@ -618,12 +618,24 @@ def test_hosts(tmp: str) -> None:
     check("kimi-code resolves to kimi", kimi is not None and kimi.id == "kimi")
     check("unknown host resolves to None", hosts.lookup("nonesuch") is None)
 
-    # Only Claude Code fires an event carrying a file path before the write, so it is
-    # the only host where the two write-time guards can attach. Every other host must
-    # say so out loud — a user who believes they are protected and is not is worse off
-    # than one who knows they are not.
+    # Claude Code and Codex both fire a pre-write event and share the deny schema, so
+    # the guards attach unmodified on both. Every other host must say out loud that they
+    # do not — a user who believes they are protected and is not is worse off than one
+    # who knows they are not.
     guarded = [h.id for h in hosts.HOSTS if h.hooks]
-    check("exactly one host claims guardrails", guarded == ["claude"], str(guarded))
+    check(
+        "only verified hosts claim guardrails", guarded == ["claude", "codex"], str(guarded)
+    )
+    check(
+        "every guarded host names its config file",
+        all(h.hooks_file for h in hosts.HOSTS if h.hooks),
+    )
+    # A pre-filter is only safe where the tool names are known; elsewhere it would
+    # never match and would disable the guard without reporting anything.
+    check(
+        "pre-filters only where tool names are verified",
+        all(h.write_tools for h in hosts.HOSTS if h.filter_conditions),
+    )
     unguarded = [h for h in hosts.HOSTS if not h.hooks]
     check(
         "every unguarded host carries a caveat",
@@ -706,6 +718,55 @@ def test_hosts(tmp: str) -> None:
             any(s in c for c in installer.HOOK_SPEC[1][4]) for s in installer.PROSE_SUFFIXES
         ),
     )
+    # Codex writes through apply_patch and its condition syntax is unverified, so it
+    # must get an unconditional guard rather than one that silently never matches.
+    installer.install(target, "codex")
+    codex_hooks = json.loads(pathlib.Path(target, ".codex/hooks.json").read_text())
+    pre = codex_hooks["PreToolUse"][0]
+    check(
+        "codex config is not nested under a hooks key",
+        "PreToolUse" in codex_hooks and "hooks" not in codex_hooks,
+        str(list(codex_hooks)),
+    )
+    check(
+        "codex matcher covers apply_patch",
+        "apply_patch" in pre["matcher"],
+        pre.get("matcher"),
+    )
+    check(
+        "codex gets no unverified if-filter",
+        all(h.get("if") is None for h in pre["hooks"]),
+        str([h.get("if") for h in pre["hooks"]]),
+    )
+    check(
+        "codex hook command drops the Claude-only variable",
+        "CLAUDE_PROJECT_DIR" not in pre["hooks"][0]["command"],
+        pre["hooks"][0]["command"],
+    )
+
+    # Both hosts' write payloads must reach the guards: Claude sends file_path, Codex
+    # sends an apply_patch body whose added lines are '+'-prefixed.
+    sys.path.insert(0, os.path.join(ROOT, ".claude/hooks"))
+    import _payload
+
+    patch = (
+        "*** Begin Patch\n*** Add File: .research/survey/x/refs.bib\n"
+        "+@article{a, author={B}}\n*** End Patch"
+    )
+    check(
+        "payload reader finds a path in a claude payload",
+        _payload.targets({"file_path": "/tmp/a.bib"}) == ["/tmp/a.bib"],
+    )
+    check(
+        "payload reader finds a path in an apply_patch body",
+        _payload.targets({"command": patch}) == [".research/survey/x/refs.bib"],
+    )
+    check(
+        "payload reader strips the diff marker",
+        _payload.written_text({"command": patch}).lstrip().startswith("@article"),
+        repr(_payload.written_text({"command": patch})[:40]),
+    )
+
     check(
         "installing into the source checkout is a no-op, not a crash",
         installer.install(ROOT, "claude") == 0,

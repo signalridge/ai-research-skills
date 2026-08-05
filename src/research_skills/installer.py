@@ -34,6 +34,7 @@ SKILLS = (
     "rs-verify",
 )
 HOOK_SCRIPTS = (
+    "_payload.py",
     "bib_provenance_guard.py",
     "absence_claim_guard.py",
     "survey_staleness.py",
@@ -116,8 +117,12 @@ def asset_dirs() -> tuple[str, str, str]:
 SRC_CLAUDE, SRC_SCRIPTS, SRC_SCHEMAS = asset_dirs()
 
 
-def hook_command(script: str) -> str:
-    return f'python3 "$CLAUDE_PROJECT_DIR/.claude/hooks/{script}"'
+def hook_command(script: str, host: hosts.Host) -> str:
+    """Claude Code expands $CLAUDE_PROJECT_DIR; other hosts do not define it, so they
+    get a path relative to the project root the agent already runs in."""
+    if host.id == "claude":
+        return f'python3 "$CLAUDE_PROJECT_DIR/.claude/hooks/{script}"'
+    return f'python3 "{host.ownership_root}/hooks/{script}"'
 
 
 def is_ours(command: str) -> bool:
@@ -347,8 +352,8 @@ def strip_ours(entries: list) -> list:
     return kept
 
 
-def merge_hooks(settings: dict, uninstall: bool) -> dict:
-    hooks = settings.get("hooks")
+def merge_hooks(settings: dict, uninstall: bool, host: hosts.Host) -> dict:
+    hooks = settings.get("hooks") if host.hooks_nested else settings
     if not isinstance(hooks, dict):
         hooks = {}
 
@@ -358,23 +363,35 @@ def merge_hooks(settings: dict, uninstall: bool) -> dict:
             # One hook entry per condition: a write to foo.py then matches none of them
             # and no process is spawned at all. With no conditions (SessionStart, Stop)
             # the single unconditional entry is the whole point.
-            base = {"type": "command", "command": hook_command(script), "timeout": timeout}
+            base = {
+                "type": "command",
+                "command": hook_command(script, host),
+                "timeout": timeout,
+            }
+            # Only pre-filter where both the tool names and the condition syntax are
+            # verified. A condition that never matches disables the guard and reports
+            # nothing; spawning a process that exits immediately merely costs 22ms.
+            use = conditions if (conditions and host.filter_conditions) else ()
             hook_entries: list[dict[str, Any]] = (
-                [dict(base, **{"if": cond}) for cond in conditions]
-                if conditions
-                else [base]
+                [dict(base, **{"if": cond}) for cond in use] if use else [base]
             )
             # Heterogeneous settings payload: a hook list under "hooks", a str under
             # "matcher" — the dict literal alone would pin the value type to the list.
             entry: dict[str, Any] = {"hooks": hook_entries}
             if matcher is not None:
-                entry["matcher"] = matcher
+                # Host-specific tool names: Codex writes via apply_patch, so a
+                # Claude-shaped Edit|Write matcher would miss every write it makes.
+                entry["matcher"] = (
+                    "|".join(host.write_tools) if host.write_tools else matcher
+                )
             entries.append(entry)
         if entries:
             hooks[event] = entries
         else:
             hooks.pop(event, None)
 
+    if not host.hooks_nested:
+        return hooks
     if hooks:
         settings["hooks"] = hooks
     else:
@@ -401,9 +418,11 @@ def install(root: str, requested: str | None = None) -> int:
         for path in install_files(root, host):
             print(f"  installed {path}")
         if host.hooks:
-            settings_path = os.path.join(root, host.ownership_root, "settings.json")
-            save_settings(settings_path, merge_hooks(load_settings(settings_path), False))
-            print(f"  hooks merged into {host.ownership_root}/settings.json")
+            settings_path = os.path.join(root, host.ownership_root, host.hooks_file)
+            save_settings(
+                settings_path, merge_hooks(load_settings(settings_path), False, host)
+            )
+            print(f"  hooks merged into {host.ownership_root}/{host.hooks_file}")
         if host.caveat:
             print(f"  note: {host.caveat}")
 
@@ -432,10 +451,10 @@ def uninstall(root: str, requested: str | None = None) -> int:
     for host in selected:
         remove_files(root, host)
         if host.hooks:
-            settings_path = os.path.join(root, host.ownership_root, "settings.json")
+            settings_path = os.path.join(root, host.ownership_root, host.hooks_file)
             if os.path.exists(settings_path):
                 save_settings(
-                    settings_path, merge_hooks(load_settings(settings_path), True)
+                    settings_path, merge_hooks(load_settings(settings_path), True, host)
                 )
     names = ", ".join(host.id for host in selected)
     print(f"research-skills removed from {root} for: {names}")
@@ -528,13 +547,13 @@ def doctor(root: str, requested: str | None = None) -> int:
             )
 
         if host.hooks:
-            print(f"\n{host.id} — settings.json hooks")
-            settings_path = os.path.join(root, host.ownership_root, "settings.json")
+            print(f"\n{host.id} — {host.hooks_file} hooks")
+            settings_path = os.path.join(root, host.ownership_root, host.hooks_file)
             settings = read_settings_quiet(settings_path)
             if settings is None:
-                item(f"{host.ownership_root}/settings.json is valid JSON", False)
+                item(f"{host.ownership_root}/{host.hooks_file} is valid JSON", False)
                 settings = {}
-            hooks_cfg = settings.get("hooks")
+            hooks_cfg = settings.get("hooks") if host.hooks_nested else settings
             if not isinstance(hooks_cfg, dict):
                 hooks_cfg = {}
             for event, _matcher, script, _timeout, _conditions in HOOK_SPEC:

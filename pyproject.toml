@@ -55,4 +55,7 @@ exclude = [
 typeCheckingMode = "standard"
 pythonVersion = "3.10"   # same floor as ruff's target-version and requires-python
 venvPath = "."
+# The guards import their sibling _payload module by directory, the way Claude Code
+# and Codex run them (script dir on sys.path[0]). Tell the checker the same thing.
+extraPaths = [".claude/hooks"]
 venv = ".venv"           # resolves pyyaml/jsonschema from the dev group for import checks

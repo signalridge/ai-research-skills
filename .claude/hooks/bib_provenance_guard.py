@@ -15,6 +15,8 @@ import os
 import re
 import sys
 
+import _payload
+
 # BibTeX entry openers, e.g. "@inproceedings{sample2025iterative,"
 ENTRY_RE = re.compile(
     r"^\s*@(article|inproceedings|incollection|book|inbook|"
@@ -67,15 +69,14 @@ def main() -> None:
     payload = json.load(sys.stdin)
     tool_input = payload.get("tool_input") or {}
 
-    path = tool_input.get("file_path") or ""
-    if not path.endswith(".bib"):
+    paths = [p for p in _payload.targets(tool_input) if p.endswith(".bib")]
+    if not paths:
         return
+    path = paths[0]
 
     # Write carries the whole file; Edit carries only the replacement text.
-    incoming = tool_input.get("content")
-    is_full_write = incoming is not None
-    if incoming is None:
-        incoming = tool_input.get("new_string") or ""
+    is_full_write = tool_input.get("content") is not None
+    incoming = _payload.written_text(tool_input)
     if not incoming:
         return
 

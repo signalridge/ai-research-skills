@@ -17,6 +17,8 @@ import os
 import re
 import sys
 
+import _payload
+
 ABSENCE_PATTERNS = [
     r"\bno prior work\b",
     r"\bno existing work\b",
@@ -108,13 +110,12 @@ def main() -> None:
     cwd = payload.get("cwd") or os.getcwd()
     tool_input = payload.get("tool_input") or {}
 
-    path = tool_input.get("file_path") or ""
-    if not path.endswith(WATCHED_SUFFIXES):
+    paths = [p for p in _payload.targets(tool_input) if p.endswith(WATCHED_SUFFIXES)]
+    if not paths:
         return
+    path = paths[0]
 
-    text = tool_input.get("content")
-    if text is None:
-        text = tool_input.get("new_string") or ""
+    text = _payload.written_text(tool_input)
     if not text:
         return
 
