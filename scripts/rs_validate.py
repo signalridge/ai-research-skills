@@ -134,7 +134,7 @@ def check_schema(data, schema_name: str, label: str) -> None:
 
 def check_protocol(proto):
     if proto is None:
-        err("protocol.yml", "missing", "run `survey` Phase 0")
+        err("protocol.yml", "missing", "run `rs-survey` Phase 0")
         return
 
     q = proto.get("question", "")
@@ -197,7 +197,7 @@ def check_protocol(proto):
 
 def check_corpus(records, proto):
     if records is None:
-        err("corpus.jsonl", "missing", "run `survey` Phase 1")
+        err("corpus.jsonl", "missing", "run `rs-survey` Phase 1")
         return
 
     for r in records:
@@ -246,7 +246,7 @@ def check_corpus(records, proto):
                 warn(
                     f"corpus.jsonl[{k}]",
                     f"number {num.get('value', '?')!r} has looked_at=false",
-                    "`verify` will block it; read the table or drop the number",
+                    "`rs-verify` will block it; read the table or drop the number",
                 )
 
         for axis, val in (r.get("axes") or {}).items():
@@ -264,6 +264,20 @@ def check_corpus(records, proto):
     for r in records:
         if r.get("screen") == "exclude" and not r.get("exclude_reason"):
             err(f"corpus.jsonl[{r.get('key', '?')}]", "exclude has no `exclude_reason`")
+
+    for r in records:
+        k = r.get("key", "?")
+        for field in ("agrees_with", "conflicts_with"):
+            for ref in (r.get("corroboration") or {}).get(field) or []:
+                if ref == k:
+                    err(f"corpus.jsonl[{k}]", f"corroboration.{field} references itself")
+                elif ref not in seen:
+                    warn(
+                        f"corpus.jsonl[{k}]",
+                        f"corroboration.{field} references unknown key `{ref}`",
+                        "corroboration is keyed to corpus records — add the record or "
+                        "fix the key",
+                    )
 
     if includes:
         shallow = sum(1 for r in includes if r.get("evidence_read") in (None, "abstract"))
@@ -295,10 +309,12 @@ def check_corpus(records, proto):
                 )
 
 
-def check_coverage(cov, proto):
+def check_coverage(cov, proto, records):
     if cov is None:
         return  # Phase 4 not reached yet
     check_schema(cov, "coverage.schema.json", "coverage.yml")
+
+    corpus_keys = {r.get("key") for r in records or [] if r.get("key")}
 
     p_axes = [
         (a.get("name"), tuple(a.get("values") or []))
@@ -332,13 +348,24 @@ def check_coverage(cov, proto):
             err(f"coverage.yml[{label}]", "marked `occupied` with no occupants")
         if state != "occupied" and cell.get("occupants"):
             err(f"coverage.yml[{label}]", f"has occupants but state is `{state}`")
-        if state == "abandoned" and cell.get("gap_id"):
+        if state == "abandoned" and cell.get("gap_id") and not cell.get("revivable_by"):
             err(
                 f"coverage.yml[{label}]",
                 f"marked `abandoned` but promoted to gap {cell['gap_id']}",
-                "abandoned means the field tried and it did not hold up — read that "
-                "failure first. If the field never actually tried, the cell is "
-                "`avoided`, not `abandoned`; see references/04-map.md Step C",
+                "abandoned means the field tried and it did not hold up. Promotion needs "
+                "a named successor: set `revivable_by` to the corpus key of the technique "
+                "that lifts the blocker, or read the failure first. If the field never "
+                "actually tried, the cell is `avoided`, not `abandoned`; see "
+                "references/04-map.md Step C",
+            )
+        revivable = cell.get("revivable_by")
+        if revivable is not None and records is not None and revivable not in corpus_keys:
+            err(
+                f"coverage.yml[{label}]",
+                f"`revivable_by` names `{revivable}`, which is not a corpus.jsonl key",
+                "the field's whole point is a successor already documented in the corpus "
+                "— a key you cannot point at is a fabricated revival. Add the record or "
+                "set the field to null",
             )
 
 
@@ -359,7 +386,7 @@ def check_gaps(gaps):
             err(
                 f"gaps.yml[{gid}]",
                 "no `closes_if` falsifier",
-                "without it `watch` cannot re-test the gap and it closes silently",
+                "without it `rs-watch` cannot re-test the gap and it closes silently",
             )
 
         if len(queries) < 3:
@@ -453,7 +480,7 @@ def main() -> int:
 
     check_protocol(proto)
     check_corpus(records, proto)
-    check_coverage(cov, proto)
+    check_coverage(cov, proto, records)
     check_gaps(gaps)
     check_refs(d, records)
 

@@ -121,7 +121,7 @@
           "closes_if": {
             "type": "string",
             "minLength": 20,
-            "description": "The falsifier, written in advance. `watch` re-tests this against every new paper. Without it a gap closes silently while you are six months into closing it yourself."
+            "description": "The falsifier, written in advance. `rs-watch` re-tests this against every new paper. Without it a gap closes silently while you are six months into closing it yourself."
           },
           "verdict": {
             "type": "object",

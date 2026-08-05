@@ -1,0 +1,58 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "research-skills"
+version = "0.3.0"
+description = "A survey-first research suite for AI/ML — one survey engine, four exits"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+dependencies = []   # stdlib only — the hooks run in whatever python3 the user has
+
+[project.urls]
+Repository = "https://github.com/signalridge/research-skills"
+
+[project.scripts]
+research-skills = "research_skills.cli:main"
+
+# The suite's assets stay at the repo root (tests and CI reference them there);
+# the wheel carries a copy under research_skills/assets/ for uvx/pip installs.
+[tool.hatch.build.targets.wheel]
+packages = ["src/research_skills"]
+
+[tool.hatch.build.targets.wheel.force-include]
+".claude" = "research_skills/assets/.claude"
+"scripts/rs_validate.py" = "research_skills/assets/research-skills/scripts/rs_validate.py"
+"schemas" = "research_skills/assets/research-skills/schemas"
+
+[dependency-groups]
+dev = [
+    "basedpyright>=1.39.9",
+    "jsonschema>=4.26.0",
+    "pyyaml>=6.0.3",
+    "ruff>=0.16.1",
+]
+
+[tool.basedpyright]
+# Every Python file in the repo: the four hooks, the validator, the test harness,
+# the install.py shim and the src/ package.
+include = [
+    ".claude/hooks",
+    "scripts",
+    "tests",
+    "install.py",
+    "src",
+]
+# basedpyright's default exclude list contains "**/.*", which would silently drop
+# .claude/hooks — spell the list out so the hooks stay checked.
+exclude = [
+    "**/__pycache__",
+    ".venv",
+    "dist",
+]
+typeCheckingMode = "standard"
+pythonVersion = "3.10"   # same floor as ruff's target-version and requires-python
+venvPath = "."
+venv = ".venv"           # resolves pyyaml/jsonschema from the dev group for import checks

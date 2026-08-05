@@ -29,7 +29,7 @@ ignore = [
 # Hooks must fail open. A guard that raises inside Claude Code's hook runner blocks real
 # work, which is strictly worse than the guard not existing — so every entry point wraps
 # main() in a bare `except Exception: pass`. That is the design, not an oversight.
-"hooks/*.py" = [
+".claude/hooks/*.py" = [
     "BLE001",  # blind except — deliberate, see above
     "S110",    # try/except/pass — deliberate, see above
     "DTZ011",  # date.today() — survey age is a local-calendar question, not an instant

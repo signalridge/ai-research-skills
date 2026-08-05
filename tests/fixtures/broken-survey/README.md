@@ -18,3 +18,4 @@ each one; if a check regresses, this fixture stops failing and the test goes red
 | 10 | every include from a single recall mode | recall warning |
 | 11 | `nearest_prior_work` omits `differing_axis` | schema check (structural layer only) |
 | 12 | an `abandoned` cell promoted to a gap | coverage check |
+| 13 | `revivable_by` names a key that is not in the corpus | coverage check |

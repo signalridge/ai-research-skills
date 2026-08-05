@@ -116,6 +116,27 @@
       "type": "string",
       "description": "One sentence: what this paper actually showed. Open-response, never a checkbox. Required for screen=include."
     },
+    "corroboration": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Cross-paper agreement on this record's claim, by citation key. Two papers disagreeing is information — never average it away; exits must carry the disagreement, not a smoothed consensus.",
+      "properties": {
+        "agrees_with": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Keys of corpus records reporting a compatible result."
+        },
+        "conflicts_with": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Keys of corpus records reporting an incompatible result on an overlapping benchmark. Usually they controlled different variables — record which."
+        }
+      }
+    },
     "numbers": {
       "type": "array",
       "description": "Every figure you intend to quote downstream. A number with no source may not appear in any exit.",

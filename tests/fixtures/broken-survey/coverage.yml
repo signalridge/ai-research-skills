@@ -12,3 +12,8 @@ cells:
     state: abandoned
     trend_evidence: "peaked 2023, declining"
     gap_id: G1
+  - coords: {method: hybrid, control: retrieval recall}
+    occupants: []
+    state: abandoned
+    trend_evidence: "BM25-era tooling failed here"
+    revivable_by: ghost2024missing

@@ -1,6 +1,6 @@
 # Worked example
 
-`worked-survey/` is a complete survey state directory at the moment `survey` freezes it —
+`worked-survey/` is a complete survey state directory at the moment `rs-survey` freezes it —
 Phase 5, ready for any of the four exits.
 
 > **The papers are synthetic.** Citation keys are deliberately unmistakable
@@ -41,12 +41,12 @@ unadjudicated tail is not an excluded one.
 
 **`coverage.yml`** — eight cells in three states. Two are `unexplored` *with*
 `trend_evidence` explaining why they are not `abandoned`. Three are `undecided`: empty, and
-the discrimination was not done. That is the honest default, and `gap-gate` caps G2 at 3 for
+the discrimination was not done. That is the honest default, and `rs-gap-gate` caps G2 at 3 for
 any cell in it.
 
 **`gaps.yml`** — one gap at `confidence: medium`, not `high`, precisely because
 `epsilon2026workshop` could not be resolved. The `closes_if` falsifier is decidable from a
-title and abstract, which is what makes `watch` able to re-test it automatically.
+title and abstract, which is what makes `rs-watch` able to re-test it automatically.
 
 **`log.md`** — the reproducibility record, including two hazards hit in real use: the arXiv
 DataCite DOI that 404s against OpenAlex, and a `2028` bucket dropped from the trend

@@ -4,13 +4,16 @@
     python3 tests/run_tests.py
     uv run --with pyyaml --with jsonschema python3 tests/run_tests.py  # + structural
 
-Covers the three things that can silently rot:
+Covers the four things that can silently rot:
 
   1. Hooks behave correctly AND fail open. A guard that crashes on a malformed payload and
      blocks real work is worse than no guard, so that case is tested explicitly.
   2. rs_validate catches every defect planted in tests/fixtures/broken-survey.
   3. The worked example in examples/ still passes its own validator — so the documentation
      cannot drift away from the schemas.
+  4. install.py lands every asset, merges hooks into settings.json idempotently, and
+     uninstalls without touching foreign hooks — and doctor reads the result back,
+     failing on an empty project and passing on an installed one.
 
 Exit 0 all green, 1 on any failure.
 """
@@ -24,7 +27,9 @@ import sys
 import tempfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-HOOKS = os.path.join(ROOT, "hooks")
+HOOKS = os.path.join(ROOT, ".claude", "hooks")
+SKILLS = os.path.join(ROOT, ".claude", "skills")
+INSTALL = os.path.join(ROOT, "install.py")
 VALIDATE = os.path.join(ROOT, "scripts", "rs_validate.py")
 BROKEN = os.path.join(ROOT, "tests", "fixtures", "broken-survey")
 EXAMPLE = os.path.join(
@@ -246,6 +251,42 @@ def test_hooks(tmp: str) -> None:
     check("stop: names the depth problem", "abstract-only" in msg, msg[:160])
     check("stop: names single-mode recall", "no other mode" in msg, msg[:160])
 
+    # Zero-corroboration: 12 includes read past the abstract, not one link between them.
+    recs = [
+        {
+            "key": f"gamma2025c{i}",
+            "title": f"C{i}",
+            "found_via": ["keyword:r1"] if i % 2 else ["citation_chain:W1:cites"],
+            "relevance": 8,
+            "screen": "include",
+            "evidence_read": "intro+method+results",
+            "accessed": "2026-08-03",
+        }
+        for i in range(12)
+    ]
+    with open(os.path.join(survey, "corpus.jsonl"), "w", encoding="utf-8") as fh:
+        fh.write("\n".join(json.dumps(r) for r in recs))
+    rc, out, _ = run_hook("stop_survey_peer.py", {"cwd": tmp, "hook_event_name": "Stop"})
+    ok = rc == 0 and outcome(out) == "warn-user"
+    msg = json.loads(out)["systemMessage"] if ok else ""
+    check("stop: zero corroboration -> warn", ok, f"outcome={outcome(out)}")
+    check(
+        "stop: names both readings of zero corroboration",
+        "genuinely uncontested" in msg and "stopped at the surface" in msg,
+        msg[:160],
+    )
+
+    recs[0]["corroboration"] = {"agrees_with": ["gamma2025c1"]}
+    with open(os.path.join(survey, "corpus.jsonl"), "w", encoding="utf-8") as fh:
+        fh.write("\n".join(json.dumps(r) for r in recs))
+    rc, out, _ = run_hook("stop_survey_peer.py", {"cwd": tmp, "hook_event_name": "Stop"})
+    msg = json.loads(out)["systemMessage"] if out else ""
+    check(
+        "stop: one corroboration link -> corroboration warning gone",
+        "uncontested" not in msg,
+        msg[:160],
+    )
+
     rc, out, _ = run_hook("stop_survey_peer.py", {"cwd": tempfile.mkdtemp()})
     check(
         "stop: no survey dir -> silent",
@@ -302,6 +343,7 @@ def test_validator() -> None:
         ("9  bib without provenance", "no tool-provenance header"),
         ("10 single-mode recall", "no other mode"),
         ("12 abandoned cell promoted to a gap", "marked `abandoned` but promoted"),
+        ("13 revivable_by names a non-corpus key", "not a corpus.jsonl key"),
     ]
     for label, needle in expected:
         check(f"catches defect {label}", needle in out, f"missing {needle!r}")
@@ -332,20 +374,20 @@ def test_validator() -> None:
     )
 
 
-# ------------------------------------------------------------------- plugin
+# ------------------------------------------------------------------- layout
 
 
-def test_plugin_shape() -> None:
-    print("\nplugin shape")
+def test_layout() -> None:
+    print("\nlayout")
 
     import re
 
-    skills = sorted(os.listdir(os.path.join(ROOT, "skills")))
+    skills = sorted(os.listdir(SKILLS))
     check("all seven skills present", len(skills) == 7, str(skills))
 
-    may_search = {"survey", "watch", "red-team"}
+    may_search = {"rs-survey", "rs-watch", "rs-red-team"}
     for s in skills:
-        p = os.path.join(ROOT, "skills", s, "SKILL.md")
+        p = os.path.join(SKILLS, s, "SKILL.md")
         head = re.match(r"^---\n(.*?)\n---", open(p, encoding="utf-8").read(), re.DOTALL)
         check(f"{s}: has frontmatter", head is not None)
         if not head:
@@ -362,12 +404,152 @@ def test_plugin_shape() -> None:
             f"disallowed-tools present={restricted}",
         )
 
-    for name in ("hooks/hooks.json", ".claude-plugin/plugin.json"):
-        try:
-            json.load(open(os.path.join(ROOT, name), encoding="utf-8"))
-            check(f"{name} parses", True)
-        except Exception as exc:
-            check(f"{name} parses", False, str(exc))
+    # Handoffs closure: every skill declares one, and every skill it names exists.
+    # The contract is prose for the agent, but the edge set is machine-checkable.
+    for s in skills:
+        text = open(os.path.join(SKILLS, s, "SKILL.md"), encoding="utf-8").read()
+        m = re.search(r"^## Handoffs\n(.*?)(?=^## |\Z)", text, re.MULTILINE | re.DOTALL)
+        check(f"{s}: declares handoffs", m is not None)
+        if not m:
+            continue
+        for ref in sorted(set(re.findall(r"rs-[a-z-]+", m.group(1))) - {s}):
+            check(f"{s}: handoff target {ref} exists", ref in skills, f"{ref} not a skill")
+
+    # Progressive disclosure: every `references/*.md` link in a SKILL.md resolves to a
+    # real file, and reference files never link further down — one level, or the
+    # disclosure graph rots where nothing checks it.
+    ref_link = re.compile(r"references/[\w.-]+\.md")
+    for s in skills:
+        text = open(os.path.join(SKILLS, s, "SKILL.md"), encoding="utf-8").read()
+        for rel in sorted(set(ref_link.findall(text))):
+            check(
+                f"{s}: {rel} resolves",
+                os.path.isfile(os.path.join(SKILLS, s, rel)),
+                f"{s}/{rel} missing",
+            )
+    refs_dir = os.path.join(SKILLS, "rs-survey", "references")
+    for f in sorted(os.listdir(refs_dir)):
+        if not f.endswith(".md"):
+            continue
+        text = open(os.path.join(refs_dir, f), encoding="utf-8").read()
+        check(f"references/{f}: no nested references/ link", ref_link.search(text) is None)
+
+    commands = sorted(
+        f
+        for f in os.listdir(os.path.join(ROOT, ".claude", "commands"))
+        if f.startswith("rs-") and f.endswith(".md")
+    )
+    check("all seven commands present", len(commands) == 7, str(commands))
+    check("install.py present", os.path.isfile(INSTALL))
+
+
+# ------------------------------------------------------------------ install
+
+
+def test_install(tmp: str) -> None:
+    print("\ninstall")
+
+    target = os.path.join(tmp, "proj")
+    os.makedirs(target)
+
+    def run(*argv: str) -> tuple[int, str]:
+        p = subprocess.run(
+            [sys.executable, INSTALL, *argv, target], capture_output=True, text=True
+        )
+        return p.returncode, p.stdout + p.stderr
+
+    def read_settings() -> dict:
+        with open(os.path.join(target, ".claude", "settings.json"), encoding="utf-8") as fh:
+            return json.load(fh)
+
+    def our_hook_entries(settings: dict) -> int:
+        n = 0
+        for entries in (settings.get("hooks") or {}).values():
+            for entry in entries:
+                for h in entry.get("hooks", []):
+                    if ".claude/hooks/" in h.get("command", ""):
+                        n += 1
+        return n
+
+    rc, out = run()
+    check("install exits 0", rc == 0, out[-200:])
+    landed = [
+        os.path.join(target, ".claude", "commands", "rs-survey.md"),
+        os.path.join(target, ".claude", "skills", "rs-survey", "SKILL.md"),
+        os.path.join(target, ".claude", "hooks", "bib_provenance_guard.py"),
+        os.path.join(target, ".claude", "research-skills", "scripts", "rs_validate.py"),
+        os.path.join(target, ".claude", "research-skills", "schemas", "corpus.schema.json"),
+    ]
+    for path in landed:
+        check(f"lands {os.path.relpath(path, target)}", os.path.isfile(path))
+
+    settings = read_settings()
+    check("settings has 4 hook entries", our_hook_entries(settings) == 4)
+    check(
+        "hook command uses $CLAUDE_PROJECT_DIR",
+        "$CLAUDE_PROJECT_DIR/.claude/hooks/bib_provenance_guard.py"
+        in settings["hooks"]["PreToolUse"][0]["hooks"][0]["command"],
+    )
+
+    rc, out = run()
+    settings = read_settings()
+    check(
+        "re-install is idempotent",
+        rc == 0 and our_hook_entries(settings) == 4,
+        f"rc={rc} entries={our_hook_entries(settings)}",
+    )
+
+    # A user's own hook in the same event must survive both directions.
+    settings["hooks"]["Stop"].append(
+        {"hooks": [{"type": "command", "command": "python3 mine.py"}]}
+    )
+    settings_path = os.path.join(target, ".claude", "settings.json")
+    with open(settings_path, "w", encoding="utf-8") as fh:
+        json.dump(settings, fh)
+    rc, _ = run("--uninstall")
+    check("uninstall exits 0", rc == 0)
+    gone = [p for p in landed if os.path.exists(p)]
+    check("uninstall removes files", not gone, str(gone))
+    settings = read_settings()
+    check(
+        "uninstall keeps foreign hooks",
+        our_hook_entries(settings) == 0
+        and settings["hooks"]["Stop"][0]["hooks"][0]["command"] == "python3 mine.py",
+        json.dumps(settings.get("hooks")),
+    )
+
+
+# ------------------------------------------------------------------- doctor
+
+
+def test_doctor(tmp: str) -> None:
+    print("\ndoctor")
+
+    env = dict(os.environ, PYTHONPATH=os.path.join(ROOT, "src"))
+
+    def run_doctor(target: str) -> tuple[int, str]:
+        p = subprocess.run(
+            [sys.executable, "-m", "research_skills", "doctor", target],
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+        return p.returncode, p.stdout + p.stderr
+
+    target = os.path.join(tmp, "proj")
+    os.makedirs(target)
+
+    rc, out = run_doctor(target)
+    check("doctor: empty project exits 1", rc == 1, f"rc={rc}")
+    check("doctor: names what is missing", "MISS" in out, out[-200:])
+
+    p = subprocess.run([sys.executable, INSTALL, target], capture_output=True, text=True)
+    rc, out = run_doctor(target)
+    check(
+        "doctor: installed project exits 0",
+        p.returncode == 0 and rc == 0,
+        f"install rc={p.returncode} doctor rc={rc}  {out[-160:]}",
+    )
 
 
 def main() -> int:
@@ -382,7 +564,11 @@ def main() -> int:
     with tempfile.TemporaryDirectory() as tmp:
         test_hooks(tmp)
     test_validator()
-    test_plugin_shape()
+    test_layout()
+    with tempfile.TemporaryDirectory() as tmp:
+        test_install(tmp)
+    with tempfile.TemporaryDirectory() as tmp:
+        test_doctor(tmp)
 
     print(f"\n{passed} passed, {len(failed)} failed")
     for f in failed:

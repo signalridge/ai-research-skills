@@ -78,6 +78,10 @@
             "type": "string",
             "pattern": "^G[0-9]+$",
             "description": "Set when this cell was promoted to a candidate gap in gaps.yml."
+          },
+          "revivable_by": {
+            "type": ["string", "null"],
+            "description": "For an `abandoned` cell whose failure is attributed to a specific tool or method: the corpus.jsonl key of the documented successor technique that lifts the blocker. Must be a real corpus key — rs_validate checks. Non-null makes the cell promotable to a gap (the 'newly possible' shape, the highest-odds opening on the grid); null keeps `abandoned` unpromoted, so a dead end is never optimistically relabelled."
           }
         }
       }
