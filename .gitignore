@@ -2,6 +2,11 @@
 # the repo root. examples/ and tests/fixtures/ carry .research/ trees on purpose.
 /.research/
 
+# .claude/{skills,commands,hooks} are the product and are tracked. settings.json is
+# generated per-install by `research-skills install`, so it is not — installing into
+# this checkout to dogfood the guards should not show up as a diff.
+.claude/settings.json
+
 # Python
 __pycache__/
 .ruff_cache/

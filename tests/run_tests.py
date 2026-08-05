@@ -484,8 +484,20 @@ def test_install(tmp: str) -> None:
     for path in landed:
         check(f"lands {os.path.relpath(path, target)}", os.path.isfile(path))
 
+    # Derived, not hardcoded: each guard contributes one entry per if-condition, so a
+    # new watched suffix changes the count and a literal here would go stale silently.
+    sys.path.insert(0, os.path.join(ROOT, "src"))
+    from research_skills import installer
+
+    expected_entries = sum(
+        len(conditions) or 1 for *_rest, conditions in installer.HOOK_SPEC
+    )
     settings = read_settings()
-    check("settings has 4 hook entries", our_hook_entries(settings) == 4)
+    check(
+        f"settings has {expected_entries} hook entries",
+        our_hook_entries(settings) == expected_entries,
+        f"got {our_hook_entries(settings)}",
+    )
     check(
         "hook command uses $CLAUDE_PROJECT_DIR",
         "$CLAUDE_PROJECT_DIR/.claude/hooks/bib_provenance_guard.py"
@@ -496,8 +508,8 @@ def test_install(tmp: str) -> None:
     settings = read_settings()
     check(
         "re-install is idempotent",
-        rc == 0 and our_hook_entries(settings) == 4,
-        f"rc={rc} entries={our_hook_entries(settings)}",
+        rc == 0 and our_hook_entries(settings) == expected_entries,
+        f"rc={rc} entries={our_hook_entries(settings)} expected={expected_entries}",
     )
 
     # A user's own hook in the same event must survive both directions.
@@ -664,6 +676,41 @@ def test_hosts(tmp: str) -> None:
         "non-claude host loses the Claude-only variable",
         "CLAUDE_PROJECT_DIR" not in codex_skill,
     )
+    # The if-conditions are a pre-filter Claude Code evaluates before spawning the
+    # guard. Too broad only wastes a process; too narrow silently disables the guard,
+    # so the patterns are generated from the same suffix tuples the guards check.
+    settings = json.loads(pathlib.Path(target, ".claude/settings.json").read_text())[
+        "hooks"
+    ]
+    for event, _m, script, _t, conditions in installer.HOOK_SPEC:
+        entry = next(
+            e for e in settings[event] if any(script in h["command"] for h in e["hooks"])
+        )
+        got = [h.get("if") for h in entry["hooks"]]
+        if conditions:
+            check(
+                f"{script}: one entry per condition",
+                got == list(conditions),
+                f"{got} != {list(conditions)}",
+            )
+        else:
+            check(f"{script}: fires unconditionally", got == [None], str(got))
+
+    check(
+        "bib guard covers every suffix it inspects",
+        all(any(s in c for c in installer.HOOK_SPEC[0][4]) for s in installer.BIB_SUFFIXES),
+    )
+    check(
+        "absence guard covers every suffix it inspects",
+        all(
+            any(s in c for c in installer.HOOK_SPEC[1][4]) for s in installer.PROSE_SUFFIXES
+        ),
+    )
+    check(
+        "installing into the source checkout is a no-op, not a crash",
+        installer.install(ROOT, "claude") == 0,
+    )
+
     check(
         "the rewritten path exists on disk",
         os.path.isfile(

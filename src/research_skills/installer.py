@@ -55,12 +55,43 @@ SCHEMAS = (
     "protocol.schema.json",
 )
 
-# event, matcher, script, timeout — mirrors what hooks/hooks.json used to declare.
+# Suffixes each write-time guard actually inspects. Kept here so the `if` conditions
+# below cannot drift from what the guard checks internally — a condition narrower than
+# the guard's own filter silently disables it, and nothing reports that.
+BIB_SUFFIXES = (".bib",)
+PROSE_SUFFIXES = (".md", ".tex", ".markdown", ".mdx")
+
+# event, matcher, script, timeout, if-conditions
+#
+# The `if` conditions are a pre-filter Claude Code evaluates BEFORE spawning the
+# process, so a write to an unrelated file costs nothing instead of ~22ms per guard.
+# Verified empirically that the glob matches at depth: a .bib three directories down
+# (.research/survey/<slug>/refs.bib — where they actually live) is still caught.
+#
+# The guards re-check the suffix themselves, so a condition that is too broad only
+# costs a process that exits immediately. Too narrow is the dangerous direction, which
+# is why the patterns are generated from the tuples above rather than typed out.
 HOOK_SPEC = (
-    ("PreToolUse", "Edit|Write", "bib_provenance_guard.py", 10),
-    ("PostToolUse", "Edit|Write", "absence_claim_guard.py", 10),
-    ("SessionStart", None, "survey_staleness.py", 10),
-    ("Stop", None, "stop_survey_peer.py", 15),
+    (
+        "PreToolUse",
+        "Edit|Write",
+        "bib_provenance_guard.py",
+        10,
+        tuple(
+            f"{tool}(*{suffix})" for suffix in BIB_SUFFIXES for tool in ("Write", "Edit")
+        ),
+    ),
+    (
+        "PostToolUse",
+        "Edit|Write",
+        "absence_claim_guard.py",
+        10,
+        tuple(
+            f"{tool}(*{suffix})" for suffix in PROSE_SUFFIXES for tool in ("Write", "Edit")
+        ),
+    ),
+    ("SessionStart", None, "survey_staleness.py", 10, ()),
+    ("Stop", None, "stop_survey_peer.py", 15, ()),
 )
 
 
@@ -105,6 +136,24 @@ def copy_tree(src: str, dst: str) -> None:
 CANONICAL_VALIDATOR = '"$CLAUDE_PROJECT_DIR/.claude/research-skills/scripts/rs_validate.py"'
 
 
+def same_file(src: str, dst: str) -> bool:
+    """Installing into the checkout the assets came from is a no-op, not an error.
+
+    `research-skills install .` inside the repo is the natural way to dogfood the
+    guards, and shutil raises SameFileError partway through — leaving settings.json
+    half-merged, which is worse than either outcome.
+    """
+    try:
+        return os.path.samefile(src, dst)
+    except OSError:
+        return False
+
+
+def copy_file(src: str, dst: str) -> None:
+    if not same_file(src, dst):
+        shutil.copy2(src, dst)
+
+
 def localise(text: str, host: hosts.Host) -> str:
     if host.id == "claude":
         return text
@@ -123,6 +172,8 @@ def copy_skill(src: str, dst: str, host: hosts.Host) -> None:
         for name in filenames:
             source = os.path.join(dirpath, name)
             target = os.path.join(target_dir, name)
+            if same_file(source, target):
+                continue
             if name.endswith(".md"):
                 with open(source, encoding="utf-8") as fh:
                     body = fh.read()
@@ -197,9 +248,13 @@ def install_files(root: str, host: hosts.Host) -> list[str]:
         dst = os.path.join(root, host.commands_dir)
         os.makedirs(dst, exist_ok=True)
         for name in COMMANDS:
-            with open(os.path.join(SRC_CLAUDE, "commands", name), encoding="utf-8") as fh:
+            source = os.path.join(SRC_CLAUDE, "commands", name)
+            target = os.path.join(dst, name)
+            if same_file(source, target):
+                continue
+            with open(source, encoding="utf-8") as fh:
                 body = fh.read()
-            with open(os.path.join(dst, name), "w", encoding="utf-8") as fh:
+            with open(target, "w", encoding="utf-8") as fh:
                 fh.write(localise(body, host))
         done.append(f"{host.commands_dir}/")
 
@@ -207,15 +262,16 @@ def install_files(root: str, host: hosts.Host) -> list[str]:
         dst = os.path.join(root, host.ownership_root, "hooks")
         os.makedirs(dst, exist_ok=True)
         for name in HOOK_SCRIPTS:
-            shutil.copy2(os.path.join(SRC_CLAUDE, "hooks", name), dst)
+            copy_file(os.path.join(SRC_CLAUDE, "hooks", name), os.path.join(dst, name))
         done.append(f"{host.ownership_root}/hooks/")
 
     # The validator and its schemas are host-neutral, but each host gets its own copy
     # so uninstalling one never breaks another.
     support = os.path.join(root, host.ownership_root, "research-skills")
     os.makedirs(os.path.join(support, "scripts"), exist_ok=True)
-    shutil.copy2(
-        os.path.join(SRC_SCRIPTS, "rs_validate.py"), os.path.join(support, "scripts")
+    copy_file(
+        os.path.join(SRC_SCRIPTS, "rs_validate.py"),
+        os.path.join(support, "scripts", "rs_validate.py"),
     )
     copy_tree(SRC_SCHEMAS, os.path.join(support, "schemas"))
     done.append(f"{host.ownership_root}/research-skills/")
@@ -296,16 +352,21 @@ def merge_hooks(settings: dict, uninstall: bool) -> dict:
     if not isinstance(hooks, dict):
         hooks = {}
 
-    for event, matcher, script, timeout in HOOK_SPEC:
+    for event, matcher, script, timeout, conditions in HOOK_SPEC:
         entries = strip_ours(hooks.get(event, []))
         if not uninstall:
+            # One hook entry per condition: a write to foo.py then matches none of them
+            # and no process is spawned at all. With no conditions (SessionStart, Stop)
+            # the single unconditional entry is the whole point.
+            base = {"type": "command", "command": hook_command(script), "timeout": timeout}
+            hook_entries: list[dict[str, Any]] = (
+                [dict(base, **{"if": cond}) for cond in conditions]
+                if conditions
+                else [base]
+            )
             # Heterogeneous settings payload: a hook list under "hooks", a str under
             # "matcher" — the dict literal alone would pin the value type to the list.
-            entry: dict[str, Any] = {
-                "hooks": [
-                    {"type": "command", "command": hook_command(script), "timeout": timeout}
-                ]
-            }
+            entry: dict[str, Any] = {"hooks": hook_entries}
             if matcher is not None:
                 entry["matcher"] = matcher
             entries.append(entry)
@@ -476,7 +537,7 @@ def doctor(root: str, requested: str | None = None) -> int:
             hooks_cfg = settings.get("hooks")
             if not isinstance(hooks_cfg, dict):
                 hooks_cfg = {}
-            for event, _matcher, script, _timeout in HOOK_SPEC:
+            for event, _matcher, script, _timeout, _conditions in HOOK_SPEC:
                 item(f"{event}: {script}", settings_has_hook(hooks_cfg, event, script))
         elif host.caveat:
             print(f"\n  note: {host.caveat}")
