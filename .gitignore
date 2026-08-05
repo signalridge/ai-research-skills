@@ -1,4 +1,4 @@
-# Survey state belongs to the project being surveyed, not to this plugin — but only at
+# Survey state belongs to the project being surveyed, not to this repo — but only at
 # the repo root. examples/ and tests/fixtures/ carry .research/ trees on purpose.
 /.research/
 
@@ -8,6 +8,14 @@ __pycache__/
 *.py[cod]
 .venv/
 venv/
+
+# Packaging
+dist/
+*.egg-info/
+
+# uv.lock is COMMITTED on purpose: it pins ruff and basedpyright, and their
+# versions decide whether lint and typecheck pass. A floating toolchain means CI
+# and your laptop can disagree about whether the code is clean.
 
 # macOS
 .DS_Store

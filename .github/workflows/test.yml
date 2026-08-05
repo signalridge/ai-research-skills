@@ -1,10 +1,13 @@
 name: test
-
 on:
   push:
     branches: [main]
   pull_request:
-
+# One toolchain everywhere: uv provisions the interpreter, resolves the dev group from
+# uv.lock, and runs everything. No pip, no setup-python — CI and a laptop see the same
+# ruff and basedpyright, so "clean here, dirty there" cannot happen.
+env:
+  UV_FROZEN: "1" # fail if uv.lock is stale rather than silently re-resolving
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -14,65 +17,56 @@ jobs:
         python: ["3.10", "3.11", "3.12", "3.13"]
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: astral-sh/setup-uv@v7
         with:
+          enable-cache: true
           python-version: ${{ matrix.python }}
-
-      # Hooks run in whatever python3 the user has. They must work on a bare interpreter,
-      # so the default path is tested with nothing installed.
-      - name: tests (stdlib only)
-        run: python3 tests/run_tests.py
-
+      # The hooks run in whatever python3 the user already has, so the default path must
+      # work with nothing installed. --no-project gives an environment with no project
+      # and no dependency group — the bare interpreter, reproduced.
+      - name: tests (bare interpreter, no packages)
+        run: uv run --no-project python tests/run_tests.py
       - name: tests (with structural validation)
-        run: |
-          python3 -m pip install --quiet pyyaml jsonschema
-          python3 tests/run_tests.py
-
+        run: uv run --group dev python tests/run_tests.py
       - name: validator against the worked example
         run: |
-          python3 scripts/rs_validate.py \
+          uv run --group dev python scripts/rs_validate.py \
             examples/worked-survey/.research/survey/retrieval-augmented-agents
-
       - name: validator rejects the broken fixture
         run: |
-          if python3 scripts/rs_validate.py tests/fixtures/broken-survey; then
+          if uv run --group dev python scripts/rs_validate.py tests/fixtures/broken-survey
+          then
             echo "::error::broken fixture passed validation — a check has regressed"
             exit 1
           fi
-
   lint:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: astral-sh/setup-uv@v7
         with:
-          python-version: "3.12"
-
+          enable-cache: true
       - name: json and yaml parse
         run: |
-          python3 -m pip install --quiet pyyaml
-          python3 - <<'PY'
+          uv run --group dev python - <<'PY'
           import json, pathlib, sys, yaml
           bad = []
-          for p in pathlib.Path(".").rglob("*.json"):
-              if ".git" in p.parts: continue
-              try: json.loads(p.read_text())
-              except Exception as e: bad.append(f"{p}: {e}")
-          for p in pathlib.Path(".").rglob("*.yml"):
-              if ".git" in p.parts: continue
-              try: yaml.safe_load(p.read_text())
-              except Exception as e: bad.append(f"{p}: {e}")
+          skip = {".git", ".venv", "node_modules", "__pycache__"}
+          for pat, load in (("*.json", json.loads), ("*.yml", yaml.safe_load),
+                            ("*.yaml", yaml.safe_load)):
+              for p in pathlib.Path(".").rglob(pat):
+                  if skip & set(p.parts): continue
+                  try: load(p.read_text())
+                  except Exception as e: bad.append(f"{p}: {e}")
           for b in bad: print(f"::error::{b}")
           sys.exit(1 if bad else 0)
           PY
-
       - name: skill frontmatter
         run: |
-          python3 -m pip install --quiet pyyaml
-          python3 - <<'PY'
+          uv run --group dev python - <<'PY'
           import pathlib, re, sys, yaml
           bad = []
-          for p in pathlib.Path("skills").glob("*/SKILL.md"):
+          for p in sorted(pathlib.Path(".claude/skills").glob("*/SKILL.md")):
               m = re.match(r"^---\n(.*?)\n---", p.read_text(), re.S)
               if not m:
                   bad.append(f"{p}: no frontmatter"); continue
@@ -85,9 +79,45 @@ jobs:
           for b in bad: print(f"::error::{b}")
           sys.exit(1 if bad else 0)
           PY
-
       - name: ruff
         run: |
-          python3 -m pip install --quiet ruff
-          ruff check hooks/ scripts/ tests/
-          ruff format --check hooks/ scripts/ tests/
+          uv run --group dev ruff check .claude/hooks/ scripts/ tests/ install.py src/
+          uv run --group dev ruff format --check .claude/hooks/ scripts/ tests/ install.py src/
+      - name: basedpyright
+        run: uv run --group dev basedpyright
+      # Relative links break when a file moves; the skills are worse, because they get
+      # installed into other projects where repo-root paths do not exist at all.
+      - name: markdown links resolve
+        run: |
+          uv run --group dev python - <<'PY'
+          import pathlib, re, sys
+          bad = []
+          for p in pathlib.Path(".").rglob("*.md"):
+              if {".git", ".venv"} & set(p.parts): continue
+              for link in re.findall(r"\]\((?!https?:|#)([^)#]+)", p.read_text()):
+                  if not (p.parent / link).exists():
+                      bad.append(f"{p}: dead link -> {link}")
+          for b in bad: print(f"::error::{b}")
+          sys.exit(1 if bad else 0)
+          PY
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      # The wheel is how uvx installs the suite; it must carry the assets.
+      - name: wheel smoke build
+        run: |
+          uv build
+          unzip -l dist/*.whl \
+            | grep "research_skills/assets/.claude/skills/rs-survey/SKILL.md"
+      # Installing into a scratch project is the only test of the thing users actually run.
+      - name: install into a scratch project
+        run: |
+          mkdir -p /tmp/scratch
+          uv run --with dist/*.whl research-skills install /tmp/scratch
+          uv run --with dist/*.whl research-skills doctor /tmp/scratch
+          test -f /tmp/scratch/.claude/skills/rs-survey/SKILL.md
+          test -f /tmp/scratch/.claude/settings.json
