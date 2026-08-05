@@ -57,3 +57,29 @@ def written_text(tool_input: dict) -> str:
     if isinstance(command, str) and command:
         return _added_lines(command)
     return ""
+
+
+def deny(reason: str) -> dict:
+    """A deny decision every host understands.
+
+    Claude Code and Codex read hookSpecificOutput.permissionDecision. Cursor reads a
+    flat {permission, user_message}. Each ignores keys it does not know, so emitting
+    both is host-agnostic and avoids a per-host output adapter — and avoids the failure
+    where a guard runs, decides to block, and the host discards the decision because it
+    arrived in the wrong shape.
+    """
+    return {
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "deny",
+            "permissionDecisionReason": reason,
+        },
+        "permission": "deny",
+        "user_message": reason,
+        "agent_message": reason,
+    }
+
+
+def block(reason: str) -> dict:
+    """A post-write objection, in both dialects."""
+    return {"decision": "block", "reason": reason, "user_message": reason}

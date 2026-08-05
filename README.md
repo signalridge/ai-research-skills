@@ -35,13 +35,20 @@ callable also get a thin invocation file (`.windsurf/workflows/`, `.kiro/steerin
 `.github/agents/`, …) pointing back at the skill. `uninstall` removes only what it wrote and leaves hooks you
 added yourself alone; `doctor` checks each host item by item.
 
-**Skills port everywhere; the guardrails reach two hosts.** They need an event that
-fires before a file is written and a way to deny it. Claude Code and Codex both have
-one and share the deny schema, so the guards run unmodified on both — Claude reads
-`.claude/settings.json`, Codex reads `.codex/hooks.json`, and each is written for you.
-Cursor's hook set has no file-write event at all. On the remaining hosts you get the
-methodology without the enforcement, and the installer says so rather than letting you
-assume otherwise.
+**Skills port everywhere; the guardrails reach four hosts.** They need an event that
+fires before a file is written and a way to deny it:
+
+| Host | Config written for you | Note |
+|---|---|---|
+| claude | `.claude/settings.json` | |
+| codex | `.codex/hooks.json` | events at top level, not nested |
+| cursor | `.cursor/hooks.json` | camelCase events; `version` is required or none load |
+| pi | `.pi/settings.json` | inert until `pi install npm:@hsingjui/pi-hooks` |
+
+The guards emit both deny dialects — `hookSpecificOutput` for Claude/Codex, a flat
+`permission` field for Cursor — so one implementation covers all four. On the remaining
+seven hosts you get the methodology without the enforcement, and the installer says so
+rather than letting you assume otherwise.
 
 Search backends are configured separately — see **[docs/SETUP.md](docs/SETUP.md)**. The
 `arxiv` MCP server is required; `openalex` and `tavily` are strongly recommended.

@@ -357,7 +357,8 @@ def merge_hooks(settings: dict, uninstall: bool, host: hosts.Host) -> dict:
     if not isinstance(hooks, dict):
         hooks = {}
 
-    for event, matcher, script, timeout, conditions in HOOK_SPEC:
+    for claude_event, matcher, script, timeout, conditions in HOOK_SPEC:
+        event = host.event_names.get(claude_event, claude_event)
         entries = strip_ours(hooks.get(event, []))
         if not uninstall:
             # One hook entry per condition: a write to foo.py then matches none of them
@@ -394,6 +395,10 @@ def merge_hooks(settings: dict, uninstall: bool, host: hosts.Host) -> dict:
         return hooks
     if hooks:
         settings["hooks"] = hooks
+        # Cursor 3.x refuses a project hooks.json without `version` and loads none of
+        # the hooks, reporting only in its settings UI.
+        for key, value in host.config_extra.items():
+            settings.setdefault(key, value)
     else:
         settings.pop("hooks", None)
     return settings
@@ -556,7 +561,8 @@ def doctor(root: str, requested: str | None = None) -> int:
             hooks_cfg = settings.get("hooks") if host.hooks_nested else settings
             if not isinstance(hooks_cfg, dict):
                 hooks_cfg = {}
-            for event, _matcher, script, _timeout, _conditions in HOOK_SPEC:
+            for claude_event, _matcher, script, _timeout, _conditions in HOOK_SPEC:
+                event = host.event_names.get(claude_event, claude_event)
                 item(f"{event}: {script}", settings_has_hook(hooks_cfg, event, script))
         elif host.caveat:
             print(f"\n  note: {host.caveat}")

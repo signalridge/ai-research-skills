@@ -643,7 +643,9 @@ def test_hosts(tmp: str) -> None:
     # who knows they are not.
     guarded = [h.id for h in hosts.HOSTS if h.hooks]
     check(
-        "only verified hosts claim guardrails", guarded == ["claude", "codex"], str(guarded)
+        "only verified hosts claim guardrails",
+        guarded == ["claude", "codex", "cursor", "pi"],
+        str(guarded),
     )
     check(
         "every guarded host names its config file",
@@ -737,6 +739,9 @@ def test_hosts(tmp: str) -> None:
             any(s in c for c in installer.HOOK_SPEC[1][4]) for s in installer.PROSE_SUFFIXES
         ),
     )
+    sys.path.insert(0, os.path.join(ROOT, ".claude/hooks"))
+    import _payload as _payload_mod
+
     # Codex writes through apply_patch and its condition syntax is unverified, so it
     # must get an unconditional guard rather than one that silently never matches.
     installer.install(target, "codex")
@@ -763,27 +768,55 @@ def test_hosts(tmp: str) -> None:
         pre["hooks"][0]["command"],
     )
 
+    # Cursor: camelCase events, and a project hooks.json without `version` loads none
+    # of its hooks while reporting only in the settings UI.
+    installer.install(target, "cursor,pi")
+    cursor_cfg = json.loads(pathlib.Path(target, ".cursor/hooks.json").read_text())
+    check(
+        "cursor config carries version",
+        cursor_cfg.get("version") == 1,
+        str(cursor_cfg.get("version")),
+    )
+    check(
+        "cursor events are camelCase",
+        "preToolUse" in cursor_cfg["hooks"] and "PreToolUse" not in cursor_cfg["hooks"],
+        str(sorted(cursor_cfg["hooks"])),
+    )
+    pi_cfg = json.loads(pathlib.Path(target, ".pi/settings.json").read_text())
+    check("pi keeps PascalCase events", "PreToolUse" in pi_cfg["hooks"])
+    check("pi carries no cursor-only version key", "version" not in pi_cfg)
+
+    # A deny the host cannot read is a guard that ran and was ignored. Claude and Codex
+    # read hookSpecificOutput; Cursor reads a flat permission field.
+    verdict = _payload_mod.deny("because")
+    check(
+        "deny speaks the claude/codex dialect",
+        verdict["hookSpecificOutput"]["permissionDecision"] == "deny",
+    )
+    check("deny speaks the cursor dialect", verdict["permission"] == "deny")
+    check(
+        "block speaks both dialects",
+        set(_payload_mod.block("x")) >= {"decision", "user_message"},
+    )
+
     # Both hosts' write payloads must reach the guards: Claude sends file_path, Codex
     # sends an apply_patch body whose added lines are '+'-prefixed.
-    sys.path.insert(0, os.path.join(ROOT, ".claude/hooks"))
-    import _payload
-
     patch = (
         "*** Begin Patch\n*** Add File: .research/survey/x/refs.bib\n"
         "+@article{a, author={B}}\n*** End Patch"
     )
     check(
         "payload reader finds a path in a claude payload",
-        _payload.targets({"file_path": "/tmp/a.bib"}) == ["/tmp/a.bib"],
+        _payload_mod.targets({"file_path": "/tmp/a.bib"}) == ["/tmp/a.bib"],
     )
     check(
         "payload reader finds a path in an apply_patch body",
-        _payload.targets({"command": patch}) == [".research/survey/x/refs.bib"],
+        _payload_mod.targets({"command": patch}) == [".research/survey/x/refs.bib"],
     )
     check(
         "payload reader strips the diff marker",
-        _payload.written_text({"command": patch}).lstrip().startswith("@article"),
-        repr(_payload.written_text({"command": patch})[:40]),
+        _payload_mod.written_text({"command": patch}).lstrip().startswith("@article"),
+        repr(_payload_mod.written_text({"command": patch})[:40]),
     )
 
     check(

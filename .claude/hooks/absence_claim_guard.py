@@ -147,10 +147,9 @@ def main() -> None:
     )
 
     json.dump(
-        {
-            "decision": "block",
-            "reason": REASON.format(path=path, quotes="\n".join(hits), diagnosis=diagnosis),
-        },
+        _payload.block(
+            REASON.format(path=path, quotes="\n".join(hits), diagnosis=diagnosis)
+        ),
         sys.stdout,
     )
 

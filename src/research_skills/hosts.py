@@ -41,6 +41,13 @@ class Host:
     hooks_nested: bool = True
     """True when the config wraps the events in a top-level `hooks` object."""
 
+    event_names: dict[str, str] = field(default_factory=dict)
+    """Rename Claude Code's event names to this host's. Cursor uses camelCase."""
+
+    config_extra: dict[str, object] = field(default_factory=dict)
+    """Keys the host requires at the top of its config. Cursor 3.x rejects a project
+    hooks.json with no `version` and loads none of the hooks — silently."""
+
     write_tools: tuple[str, ...] = ()
     """Tool names this host uses for file writes, for the hook matcher. Empty means
     fall back to matching every tool — correct, just less efficient."""
@@ -122,9 +129,26 @@ HOSTS: tuple[Host, ...] = (
         skills_dir=".cursor/skills",
         ownership_root=".cursor",
         detect_paths=(".cursor",),
-        # Verified against ~/.cursor/hooks.json: beforeSubmitPrompt, stop, sessionEnd.
-        # None of them carry a file path, so the write-time guards cannot be attached.
-        caveat=NO_GUARDS + " Cursor has no file-write hook event to attach them to.",
+        # Cursor does have preToolUse/postToolUse; an earlier reading of this machine's
+        # ~/.cursor/hooks.json saw only the three events that happened to be configured
+        # there and wrongly concluded the host had no file-write event.
+        #
+        # Three differences from Claude Code, each of which fails silently if missed:
+        # event names are camelCase, a project hooks.json without `version` loads none
+        # of its hooks, and the deny decision is read from a flat {permission,
+        # user_message} rather than hookSpecificOutput. hooks/_payload.py emits both
+        # dialects, so the guards need no per-host branch.
+        hooks=True,
+        hooks_file="hooks.json",
+        hooks_nested=True,
+        config_extra={"version": 1},
+        event_names={
+            "PreToolUse": "preToolUse",
+            "PostToolUse": "postToolUse",
+            "SessionStart": "sessionStart",
+            "Stop": "stop",
+        },
+        write_tools=("Write", "Edit"),
     ),
     Host(
         id="qwen",
@@ -182,7 +206,18 @@ HOSTS: tuple[Host, ...] = (
         skills_dir=".pi/skills",
         ownership_root=".pi",
         detect_paths=(".pi",),
-        caveat=NO_GUARDS,
+        # Pi's native extension API is TypeScript, but the @hsingjui/pi-hooks package
+        # provides Claude-Code-compatible command hooks in .pi/settings.json using the
+        # same nested shape, event names and deny schema. The config is written either
+        # way; without the package it is inert, so the caveat says so rather than
+        # letting an inert file read as protection.
+        hooks=True,
+        hooks_file="settings.json",
+        write_tools=("write", "edit"),
+        caveat=(
+            "guardrails need `pi install npm:@hsingjui/pi-hooks` — the config is "
+            "written but does nothing until that package is present."
+        ),
     ),
     Host(
         id="kimi",

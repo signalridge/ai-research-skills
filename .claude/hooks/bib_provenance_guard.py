@@ -52,16 +52,7 @@ If this file genuinely is tool-generated, its header is missing — add a first 
 
 
 def deny(reason: str) -> None:
-    json.dump(
-        {
-            "hookSpecificOutput": {
-                "hookEventName": "PreToolUse",
-                "permissionDecision": "deny",
-                "permissionDecisionReason": reason,
-            }
-        },
-        sys.stdout,
-    )
+    json.dump(_payload.deny(reason), sys.stdout)
     sys.exit(0)
 
 
