@@ -98,6 +98,40 @@ def copy_tree(src: str, dst: str) -> None:
     shutil.copytree(src, dst, dirs_exist_ok=True)
 
 
+# The skills are authored against Claude Code's layout, which is the richest surface.
+# Every other host puts the same files under its own root and has no $CLAUDE_PROJECT_DIR,
+# so a verbatim copy tells the agent to run a path that does not exist. Rewrite on the
+# way in rather than authoring eleven variants.
+CANONICAL_VALIDATOR = '"$CLAUDE_PROJECT_DIR/.claude/research-skills/scripts/rs_validate.py"'
+
+
+def localise(text: str, host: hosts.Host) -> str:
+    if host.id == "claude":
+        return text
+    return text.replace(
+        CANONICAL_VALIDATOR,
+        f'"{host.ownership_root}/research-skills/scripts/rs_validate.py"',
+    )
+
+
+def copy_skill(src: str, dst: str, host: hosts.Host) -> None:
+    """copy_tree, but markdown gets host-local paths substituted in."""
+    for dirpath, _dirnames, filenames in os.walk(src):
+        rel = os.path.relpath(dirpath, src)
+        target_dir = os.path.join(dst, rel) if rel != "." else dst
+        os.makedirs(target_dir, exist_ok=True)
+        for name in filenames:
+            source = os.path.join(dirpath, name)
+            target = os.path.join(target_dir, name)
+            if name.endswith(".md"):
+                with open(source, encoding="utf-8") as fh:
+                    body = fh.read()
+                with open(target, "w", encoding="utf-8") as fh:
+                    fh.write(localise(body, host))
+            else:
+                shutil.copy2(source, target)
+
+
 def skill_description(skill: str) -> str:
     """First line of a skill's frontmatter description, for invocation stubs."""
     path = os.path.join(SRC_CLAUDE, "skills", skill, "SKILL.md")
@@ -148,9 +182,10 @@ def install_files(root: str, host: hosts.Host) -> list[str]:
     done = []
 
     for skill in SKILLS:
-        copy_tree(
+        copy_skill(
             os.path.join(SRC_CLAUDE, "skills", skill),
             os.path.join(root, host.skills_dir, skill),
+            host,
         )
     done.append(f"{host.skills_dir}/")
 
@@ -162,7 +197,10 @@ def install_files(root: str, host: hosts.Host) -> list[str]:
         dst = os.path.join(root, host.commands_dir)
         os.makedirs(dst, exist_ok=True)
         for name in COMMANDS:
-            shutil.copy2(os.path.join(SRC_CLAUDE, "commands", name), dst)
+            with open(os.path.join(SRC_CLAUDE, "commands", name), encoding="utf-8") as fh:
+                body = fh.read()
+            with open(os.path.join(dst, name), "w", encoding="utf-8") as fh:
+                fh.write(localise(body, host))
         done.append(f"{host.commands_dir}/")
 
     if host.hooks:

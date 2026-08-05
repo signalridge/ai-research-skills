@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import os
+import pathlib
 import subprocess
 import sys
 import tempfile
@@ -641,6 +642,34 @@ def test_hosts(tmp: str) -> None:
         [h.id for h in chosen] == ["pi", "kimi"],
     )
     check("unknown ids are reported, not silently dropped", unknown == ["nonesuch"])
+
+    # The skills are authored against Claude Code's layout. Copied verbatim to another
+    # host they tell the agent to run $CLAUDE_PROJECT_DIR/.claude/… — an undefined
+    # variable and the wrong root, so the command silently resolves to nothing.
+    from research_skills import installer
+
+    target = os.path.join(tmp, "paths")
+    installer.install(target, "claude,codex")
+    claude_skill = pathlib.Path(target, ".claude/skills/rs-survey/SKILL.md").read_text()
+    codex_skill = pathlib.Path(target, ".codex/skills/rs-survey/SKILL.md").read_text()
+    check(
+        "claude keeps $CLAUDE_PROJECT_DIR",
+        "$CLAUDE_PROJECT_DIR/.claude/research-skills" in claude_skill,
+    )
+    check(
+        "non-claude host gets its own root",
+        ".codex/research-skills/scripts/rs_validate.py" in codex_skill,
+    )
+    check(
+        "non-claude host loses the Claude-only variable",
+        "CLAUDE_PROJECT_DIR" not in codex_skill,
+    )
+    check(
+        "the rewritten path exists on disk",
+        os.path.isfile(
+            os.path.join(target, ".codex/research-skills/scripts/rs_validate.py")
+        ),
+    )
 
 
 def main() -> int:
