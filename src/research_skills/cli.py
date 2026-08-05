@@ -14,7 +14,7 @@ import argparse
 import os
 import sys
 
-from research_skills import __version__, installer
+from research_skills import __version__, hosts, installer
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -33,6 +33,12 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument(
             "root", nargs="?", default=".", help="target project root (default: cwd)"
         )
+        p.add_argument(
+            "--host",
+            metavar="IDS",
+            help="comma-separated hosts (default: whichever the project already uses, "
+            "else claude). Known: " + ", ".join(hosts.known_ids()),
+        )
     return ap
 
 
@@ -43,10 +49,10 @@ def main() -> int:
     args = build_parser().parse_args()
     root = os.path.abspath(args.root)
     if args.command == "install":
-        return installer.install(root)
+        return installer.install(root, args.host)
     if args.command == "uninstall":
-        return installer.uninstall(root)
-    return installer.doctor(root)
+        return installer.uninstall(root, args.host)
+    return installer.doctor(root, args.host)
 
 
 if __name__ == "__main__":

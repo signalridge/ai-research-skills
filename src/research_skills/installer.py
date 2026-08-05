@@ -21,6 +21,8 @@ import shutil
 import sys
 from typing import Any
 
+from research_skills import hosts
+
 SKILLS = (
     "rs-survey",
     "rs-gap-gate",
@@ -95,59 +97,74 @@ def copy_tree(src: str, dst: str) -> None:
     shutil.copytree(src, dst, dirs_exist_ok=True)
 
 
-def install_files(root: str) -> list[str]:
-    claude = os.path.join(root, ".claude")
+def install_files(root: str, host: hosts.Host) -> list[str]:
+    """Copy the suite into one host's tree. Skills and support files everywhere;
+    commands and hooks only where the host has a surface for them."""
     done = []
-
-    dst = os.path.join(claude, "commands")
-    os.makedirs(dst, exist_ok=True)
-    for name in COMMANDS:
-        shutil.copy2(os.path.join(SRC_CLAUDE, "commands", name), dst)
-    done.append(".claude/commands/")
 
     for skill in SKILLS:
         copy_tree(
             os.path.join(SRC_CLAUDE, "skills", skill),
-            os.path.join(claude, "skills", skill),
+            os.path.join(root, host.skills_dir, skill),
         )
-    done.append(".claude/skills/")
+    done.append(f"{host.skills_dir}/")
 
-    dst = os.path.join(claude, "hooks")
-    os.makedirs(dst, exist_ok=True)
-    for name in HOOK_SCRIPTS:
-        shutil.copy2(os.path.join(SRC_CLAUDE, "hooks", name), dst)
-    done.append(".claude/hooks/")
+    if host.commands_dir:
+        dst = os.path.join(root, host.commands_dir)
+        os.makedirs(dst, exist_ok=True)
+        for name in COMMANDS:
+            shutil.copy2(os.path.join(SRC_CLAUDE, "commands", name), dst)
+        done.append(f"{host.commands_dir}/")
 
-    support = os.path.join(claude, "research-skills")
+    if host.hooks:
+        dst = os.path.join(root, host.ownership_root, "hooks")
+        os.makedirs(dst, exist_ok=True)
+        for name in HOOK_SCRIPTS:
+            shutil.copy2(os.path.join(SRC_CLAUDE, "hooks", name), dst)
+        done.append(f"{host.ownership_root}/hooks/")
+
+    # The validator and its schemas are host-neutral, but each host gets its own copy
+    # so uninstalling one never breaks another.
+    support = os.path.join(root, host.ownership_root, "research-skills")
     os.makedirs(os.path.join(support, "scripts"), exist_ok=True)
     shutil.copy2(
-        os.path.join(SRC_SCRIPTS, "rs_validate.py"),
-        os.path.join(support, "scripts"),
+        os.path.join(SRC_SCRIPTS, "rs_validate.py"), os.path.join(support, "scripts")
     )
     copy_tree(SRC_SCHEMAS, os.path.join(support, "schemas"))
-    done.append(".claude/research-skills/")
+    done.append(f"{host.ownership_root}/research-skills/")
 
     return done
 
 
-def remove_files(root: str) -> None:
-    claude = os.path.join(root, ".claude")
-
-    cmd_dir = os.path.join(claude, "commands")
-    for name in COMMANDS:
-        path = os.path.join(cmd_dir, name)
-        if os.path.exists(path):
-            os.remove(path)
-
+def remove_files(root: str, host: hosts.Host) -> None:
+    """Remove only what install_files wrote. Anything else under the host's tree
+    belongs to the user."""
     for skill in SKILLS:
-        shutil.rmtree(os.path.join(claude, "skills", skill), ignore_errors=True)
+        shutil.rmtree(os.path.join(root, host.skills_dir, skill), ignore_errors=True)
 
-    for name in HOOK_SCRIPTS:
-        path = os.path.join(claude, "hooks", name)
-        if os.path.exists(path):
-            os.remove(path)
+    if host.commands_dir:
+        for name in COMMANDS:
+            path = os.path.join(root, host.commands_dir, name)
+            if os.path.exists(path):
+                os.remove(path)
 
-    shutil.rmtree(os.path.join(claude, "research-skills"), ignore_errors=True)
+    if host.hooks:
+        for name in HOOK_SCRIPTS:
+            path = os.path.join(root, host.ownership_root, "hooks", name)
+            if os.path.exists(path):
+                os.remove(path)
+
+    shutil.rmtree(
+        os.path.join(root, host.ownership_root, "research-skills"), ignore_errors=True
+    )
+
+    # Leave no empty shells behind, but never remove a directory the user put things in.
+    for rel in (host.skills_dir, host.commands_dir, f"{host.ownership_root}/hooks"):
+        if not rel:
+            continue
+        path = os.path.join(root, rel)
+        if os.path.isdir(path) and not os.listdir(path):
+            os.rmdir(path)
 
 
 def load_settings(path: str) -> dict:
@@ -213,28 +230,56 @@ def save_settings(path: str, settings: dict) -> None:
         fh.write("\n")
 
 
-def install(root: str) -> int:
-    for path in install_files(root):
-        print(f"  installed {path}")
-    settings_path = os.path.join(root, ".claude", "settings.json")
-    save_settings(settings_path, merge_hooks(load_settings(settings_path), False))
-    print("  hooks merged into .claude/settings.json")
+def install(root: str, requested: str | None = None) -> int:
+    selected, unknown = hosts.resolve(root, requested)
+    for bad in unknown:
+        print(f"unknown host {bad!r} — known: {', '.join(hosts.known_ids())}")
+    if unknown:
+        return 2
 
+    for host in selected:
+        print(f"{host.id}:")
+        for path in install_files(root, host):
+            print(f"  installed {path}")
+        if host.hooks:
+            settings_path = os.path.join(root, host.ownership_root, "settings.json")
+            save_settings(settings_path, merge_hooks(load_settings(settings_path), False))
+            print(f"  hooks merged into {host.ownership_root}/settings.json")
+        if host.caveat:
+            print(f"  note: {host.caveat}")
+
+    names = ", ".join(host.id for host in selected)
+    guarded = [host.id for host in selected if host.hooks]
+    print(f"\nresearch-skills installed into {root} for: {names}")
+    if guarded:
+        print(f"Guardrails active on: {', '.join(guarded)}")
+    else:
+        print("Guardrails active on: none of these hosts — /rs-audit is your only check.")
     print(
-        f"\nresearch-skills installed into {root}\n"
         "Commands: /rs-survey /rs-gate /rs-relwork /rs-brief /rs-watch /rs-audit /rs-help\n"
-        "Search backends are configured separately — see SETUP.md "
+        "Search backends are configured separately — see docs/SETUP.md "
         "(arxiv MCP required, openalex and tavily recommended)."
     )
     return 0
 
 
-def uninstall(root: str) -> int:
-    remove_files(root)
-    settings_path = os.path.join(root, ".claude", "settings.json")
-    if os.path.exists(settings_path):
-        save_settings(settings_path, merge_hooks(load_settings(settings_path), True))
-    print(f"research-skills removed from {root}")
+def uninstall(root: str, requested: str | None = None) -> int:
+    selected, unknown = hosts.resolve(root, requested)
+    for bad in unknown:
+        print(f"unknown host {bad!r} — known: {', '.join(hosts.known_ids())}")
+    if unknown:
+        return 2
+
+    for host in selected:
+        remove_files(root, host)
+        if host.hooks:
+            settings_path = os.path.join(root, host.ownership_root, "settings.json")
+            if os.path.exists(settings_path):
+                save_settings(
+                    settings_path, merge_hooks(load_settings(settings_path), True)
+                )
+    names = ", ".join(host.id for host in selected)
+    print(f"research-skills removed from {root} for: {names}")
     return 0
 
 
@@ -261,10 +306,16 @@ def read_settings_quiet(path: str) -> dict | None:
     return data if isinstance(data, dict) else None
 
 
-def doctor(root: str) -> int:
-    """Check an installation item by item. Exit 1 if anything is missing."""
-    claude = os.path.join(root, ".claude")
+def doctor(root: str, requested: str | None = None) -> int:
+    """Check an installation item by item, per host. Exit 1 if anything is missing."""
+    selected, unknown = hosts.resolve(root, requested)
+    for bad in unknown:
+        print(f"unknown host {bad!r} — known: {', '.join(hosts.known_ids())}")
+    if unknown:
+        return 2
+
     missing = 0
+    any_installed = False
 
     def item(label: str, present: bool) -> None:
         nonlocal missing
@@ -272,52 +323,77 @@ def doctor(root: str) -> int:
             missing += 1
         print(f"  {'ok  ' if present else 'MISS'} {label}")
 
-    print(f"research-skills doctor — {root}\n")
-    print("suite files")
-    for name in COMMANDS:
-        item(
-            f".claude/commands/{name}",
-            os.path.isfile(os.path.join(claude, "commands", name)),
-        )
-    for skill in SKILLS:
-        item(
-            f".claude/skills/{skill}/SKILL.md",
-            os.path.isfile(os.path.join(claude, "skills", skill, "SKILL.md")),
-        )
-    for name in HOOK_SCRIPTS:
-        item(
-            f".claude/hooks/{name}",
-            os.path.isfile(os.path.join(claude, "hooks", name)),
-        )
-    support = os.path.join(claude, "research-skills")
-    item(
-        ".claude/research-skills/scripts/rs_validate.py",
-        os.path.isfile(os.path.join(support, "scripts", "rs_validate.py")),
-    )
-    for name in SCHEMAS:
-        item(
-            f".claude/research-skills/schemas/{name}",
-            os.path.isfile(os.path.join(support, "schemas", name)),
-        )
+    print(f"research-skills doctor — {root}")
+    print(f"hosts: {', '.join(host.id for host in selected)}\n")
 
-    print("\nsettings.json hooks")
-    settings = read_settings_quiet(os.path.join(claude, "settings.json"))
-    if settings is None:
-        item(".claude/settings.json is present and valid JSON", False)
-        settings = {}
-    hooks = settings.get("hooks")
-    if not isinstance(hooks, dict):
-        hooks = {}
-    for event, _matcher, script, _timeout in HOOK_SPEC:
-        item(f"{event}: {script}", settings_has_hook(hooks, event, script))
+    for host in selected:
+        # A host the project uses but never installed into is not broken. Only count
+        # missing files when something IS installed there — that means real breakage.
+        installed_here = any(
+            os.path.isfile(os.path.join(root, host.skills_dir, skill, "SKILL.md"))
+            for skill in SKILLS
+        )
+        if not installed_here:
+            print(f"{host.id} — not installed")
+            print(f"  hint  research-skills install {root} --host {host.id}\n")
+            continue
+        any_installed = True
 
-    print("\nsearch backends")
+        print(f"{host.id} — suite files")
+        for skill in SKILLS:
+            item(
+                f"{host.skills_dir}/{skill}/SKILL.md",
+                os.path.isfile(os.path.join(root, host.skills_dir, skill, "SKILL.md")),
+            )
+        if host.commands_dir:
+            for name in COMMANDS:
+                item(
+                    f"{host.commands_dir}/{name}",
+                    os.path.isfile(os.path.join(root, host.commands_dir, name)),
+                )
+        if host.hooks:
+            for name in HOOK_SCRIPTS:
+                item(
+                    f"{host.ownership_root}/hooks/{name}",
+                    os.path.isfile(os.path.join(root, host.ownership_root, "hooks", name)),
+                )
+        support = os.path.join(root, host.ownership_root, "research-skills")
+        item(
+            f"{host.ownership_root}/research-skills/scripts/rs_validate.py",
+            os.path.isfile(os.path.join(support, "scripts", "rs_validate.py")),
+        )
+        for name in SCHEMAS:
+            item(
+                f"{host.ownership_root}/research-skills/schemas/{name}",
+                os.path.isfile(os.path.join(support, "schemas", name)),
+            )
+
+        if host.hooks:
+            print(f"\n{host.id} — settings.json hooks")
+            settings_path = os.path.join(root, host.ownership_root, "settings.json")
+            settings = read_settings_quiet(settings_path)
+            if settings is None:
+                item(f"{host.ownership_root}/settings.json is valid JSON", False)
+                settings = {}
+            hooks_cfg = settings.get("hooks")
+            if not isinstance(hooks_cfg, dict):
+                hooks_cfg = {}
+            for event, _matcher, script, _timeout in HOOK_SPEC:
+                item(f"{event}: {script}", settings_has_hook(hooks_cfg, event, script))
+        elif host.caveat:
+            print(f"\n  note: {host.caveat}")
+        print()
+
+    print("search backends")
     if os.environ.get("OPENALEX_API_KEY"):
         print("  ok   OPENALEX_API_KEY is set")
     else:
-        print("  warn OPENALEX_API_KEY is not set — openalex needs it (see SETUP.md)")
+        print("  warn OPENALEX_API_KEY is not set — openalex needs it (see docs/SETUP.md)")
     print("  hint run `claude mcp list` to check that the search backends are connected")
 
+    if not any_installed:
+        print("\nnot installed for any host here")
+        return 1
     print(f"\n{missing} item(s) missing" if missing else "\nall checks passed")
     return 1 if missing else 0
 

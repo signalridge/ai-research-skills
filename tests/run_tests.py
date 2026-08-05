@@ -541,7 +541,19 @@ def test_doctor(tmp: str) -> None:
 
     rc, out = run_doctor(target)
     check("doctor: empty project exits 1", rc == 1, f"rc={rc}")
-    check("doctor: names what is missing", "MISS" in out, out[-200:])
+    # An empty project is "not installed", not "installed and broken". Listing every
+    # absent file for every known host was 60 lines of noise; the actionable thing is
+    # the command that fixes it.
+    check(
+        "doctor: empty project says not installed",
+        "not installed" in out,
+        out[-300:],
+    )
+    check(
+        "doctor: empty project names the fix",
+        "research-skills install" in out,
+        out[-300:],
+    )
 
     p = subprocess.run([sys.executable, INSTALL, target], capture_output=True, text=True)
     rc, out = run_doctor(target)
@@ -550,6 +562,64 @@ def test_doctor(tmp: str) -> None:
         p.returncode == 0 and rc == 0,
         f"install rc={p.returncode} doctor rc={rc}  {out[-160:]}",
     )
+
+
+# -------------------------------------------------------------------- hosts
+
+
+def test_hosts(tmp: str) -> None:
+    """The registry is the multi-agent contract: detection, scoping, and honesty about
+    which hosts can actually run the guardrails."""
+    print("\nhosts")
+    sys.path.insert(0, os.path.join(ROOT, "src"))
+    from research_skills import hosts
+
+    ids = hosts.known_ids()
+    check(
+        "registry covers the five agents",
+        set(ids) >= {"claude", "codex", "cursor", "pi", "kimi"},
+        str(ids),
+    )
+    kimi = hosts.lookup("kimi-code")
+    check("kimi-code resolves to kimi", kimi is not None and kimi.id == "kimi")
+    check("unknown host resolves to None", hosts.lookup("nonesuch") is None)
+
+    # Only Claude Code fires an event carrying a file path before the write, so it is
+    # the only host where the two write-time guards can attach. Every other host must
+    # say so out loud — a user who believes they are protected and is not is worse off
+    # than one who knows they are not.
+    guarded = [h.id for h in hosts.HOSTS if h.hooks]
+    check("exactly one host claims guardrails", guarded == ["claude"], str(guarded))
+    unguarded = [h for h in hosts.HOSTS if not h.hooks]
+    check(
+        "every unguarded host carries a caveat",
+        all(h.caveat for h in unguarded),
+        str([h.id for h in unguarded if not h.caveat]),
+    )
+    check(
+        "ownership roots are distinct",
+        len({h.ownership_root for h in hosts.HOSTS}) == len(hosts.HOSTS),
+    )
+
+    proj = os.path.join(tmp, "detect")
+    os.makedirs(os.path.join(proj, ".codex"), exist_ok=True)
+    os.makedirs(os.path.join(proj, ".cursor"), exist_ok=True)
+    detected, _ = hosts.resolve(proj, None)
+    check(
+        "detection finds the hosts a project uses",
+        {h.id for h in detected} == {"codex", "cursor"},
+        str([h.id for h in detected]),
+    )
+    check(
+        "bare project falls back to claude",
+        [h.id for h in hosts.resolve(os.path.join(tmp, "bare"), None)[0]] == ["claude"],
+    )
+    chosen, unknown = hosts.resolve(proj, "pi, kimi-code , nonesuch")
+    check(
+        "explicit selection overrides detection",
+        [h.id for h in chosen] == ["pi", "kimi"],
+    )
+    check("unknown ids are reported, not silently dropped", unknown == ["nonesuch"])
 
 
 def main() -> int:
@@ -563,6 +633,7 @@ def main() -> int:
 
     with tempfile.TemporaryDirectory() as tmp:
         test_hooks(tmp)
+        test_hosts(tmp)
     test_validator()
     test_layout()
     with tempfile.TemporaryDirectory() as tmp:

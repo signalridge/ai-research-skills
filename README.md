@@ -28,9 +28,16 @@ Into any project you want to run a survey in:
 uvx --from ~/ghq/github.com/signalridge/research-skills research-skills install .
 ```
 
-Copies the suite into `.claude/` and merges its hooks into `.claude/settings.json`.
-`research-skills uninstall` removes it and leaves hooks you added yourself alone;
-`research-skills doctor` checks an installation item by item.
+It installs into whichever agents the project already uses — `.claude/`, `.codex/`,
+`.cursor/`, `.pi/`, `.kimi/` — or Claude Code if it uses none. Scope it with
+`--host claude,codex`. `uninstall` removes only what it wrote and leaves hooks you
+added yourself alone; `doctor` checks each host item by item.
+
+**Skills port everywhere; the guardrails do not.** They need a hook that fires before
+a file is written, with the path in the payload. Only Claude Code has one — Cursor's
+hook set has no file-write event at all. On every other host you get the methodology
+without the enforcement, and the installer says so rather than letting you assume
+otherwise.
 
 Search backends are configured separately — see **[docs/SETUP.md](docs/SETUP.md)**. The
 `arxiv` MCP server is required; `openalex` and `tavily` are strongly recommended.
