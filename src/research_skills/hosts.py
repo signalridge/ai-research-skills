@@ -73,6 +73,19 @@ NO_GUARDS = (
     "are not blocked on this host; run /rs-audit manually before trusting a draft."
 )
 
+# Why the other nine hosts get no hook config, rather than one written on a guess:
+#
+# Claude Code and Codex were both checked and both work — same event names, same
+# hookSpecificOutput deny schema, only the config file and write payload differ.
+# Cursor was checked and does not: its hook set is beforeSubmitPrompt / stop /
+# sessionEnd, none of which carry a file path, so there is nothing to attach to.
+#
+# The rest are unchecked. host distribution reference is not the reference here — it installs skills across
+# ten hosts and deliberately installs no agent hooks at all, so there is nothing in it
+# to copy on this point. Writing a config from a guess is worse than writing none: a
+# wrong one can break a working agent setup, and a config that parses but never fires
+# leaves the user believing the guards are running.
+
 HOSTS: tuple[Host, ...] = (
     Host(
         id="claude",
@@ -125,7 +138,7 @@ HOSTS: tuple[Host, ...] = (
         skills_dir=".opencode/skills",
         ownership_root=".opencode",
         detect_paths=(".opencode",),
-        invocation_dir=".opencode/command",
+        invocation_dir=".opencode/commands",
         caveat=NO_GUARDS,
     ),
     Host(

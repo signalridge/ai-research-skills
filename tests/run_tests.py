@@ -606,6 +606,25 @@ def test_hosts(tmp: str) -> None:
         },
         str(ids),
     )
+    # Paths are lifted from host distribution reference's adapter, which verified them per host. A stub in
+    # the wrong directory is invisible to the host and reports nothing, so the exact
+    # strings are pinned rather than trusted to a careful reading. `.opencode/command`
+    # instead of `.opencode/commands` is the mistake this caught.
+    host distribution reference_paths = {
+        "opencode": ".opencode/commands",
+        "windsurf": ".windsurf/workflows",
+        "kilo": ".kilo/commands",
+        "kiro": ".kiro/steering",
+        "copilot": ".github/agents",
+    }
+    for host in hosts.HOSTS:
+        if host.invocation_dir:
+            check(
+                f"{host.id}: invocation dir matches host distribution reference",
+                host.invocation_dir == host distribution reference_paths.get(host.id),
+                f"{host.invocation_dir} != {host distribution reference_paths.get(host.id)}",
+            )
+
     # A stub that points at a path the installer never writes is a silent dead end.
     for host in hosts.HOSTS:
         if host.invocation_dir:
