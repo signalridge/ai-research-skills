@@ -4,6 +4,18 @@ Modelled on host-reference-01's adapter registry: one record per host naming whe
 its skills live, what the installer owns (so uninstall never touches a foreign file),
 and how to detect that a project uses it.
 
+Scope is deliberately narrow: a host earns a record by having a verified way to run the
+guardrails, or by being one the author actually uses. Hosts that can only take skills
+were dropped rather than shipped — the design rests on enforcement being real, and an
+adapter that installs the methodology alone hands the user a false sense of it. The
+removed six (qwen, opencode, windsurf, kilo, kiro, copilot) also needed thin invocation
+stub files, and deleting them took that whole mechanism with them.
+
+OpenCode is the one worth revisiting: it does have a blocking pre-tool hook
+(`tool.execute.before`, blocks by throwing), but only through a TypeScript plugin in
+.opencode/plugin/, so wiring it up means shipping a TS bridge that shells out to these
+Python guards rather than a config file.
+
 The honest part is `hooks`. Skills are portable — a SKILL.md body is the same text
 everywhere. The four guardrails are not: they need a host that fires an event *before*
 a file is written, with the path in the payload. Claude Code has that. Cursor's hook set
@@ -64,15 +76,6 @@ class Host:
     """What the user does not get here. Printed at install time when non-empty."""
 
     aliases: tuple[str, ...] = field(default_factory=tuple)
-
-    invocation_dir: str | None = None
-    """Hosts that do not make a skills/ directory directly callable need a thin file
-    here that points back at the SKILL.md. Formats differ; see `include`."""
-
-    include: str = "@{path}"
-    """How the invocation file references the skill body. Kiro uses its own syntax."""
-
-    invocation_suffix: str = ".md"
 
 
 NO_GUARDS = (
@@ -149,57 +152,6 @@ HOSTS: tuple[Host, ...] = (
             "Stop": "stop",
         },
         write_tools=("Write", "Edit"),
-    ),
-    Host(
-        id="qwen",
-        skills_dir=".qwen/skills",
-        ownership_root=".qwen",
-        detect_paths=(".qwen",),
-        caveat=NO_GUARDS,
-    ),
-    Host(
-        id="opencode",
-        skills_dir=".opencode/skills",
-        ownership_root=".opencode",
-        detect_paths=(".opencode",),
-        invocation_dir=".opencode/commands",
-        caveat=NO_GUARDS,
-    ),
-    Host(
-        id="windsurf",
-        skills_dir=".windsurf/skills",
-        ownership_root=".windsurf",
-        detect_paths=(".windsurf",),
-        invocation_dir=".windsurf/workflows",
-        caveat=NO_GUARDS,
-    ),
-    Host(
-        id="kilo",
-        skills_dir=".kilocode/skills",
-        ownership_root=".kilocode",
-        detect_paths=(".kilo", ".kilocode"),
-        invocation_dir=".kilo/commands",
-        caveat=NO_GUARDS,
-        aliases=("kilocode",),
-    ),
-    Host(
-        id="kiro",
-        skills_dir=".kiro/skills",
-        ownership_root=".kiro",
-        detect_paths=(".kiro",),
-        invocation_dir=".kiro/steering",
-        include="#[[file:{path}]]",
-        caveat=NO_GUARDS,
-    ),
-    Host(
-        id="copilot",
-        # Copilot has no skills concept; each capability is one self-contained agent file.
-        skills_dir=".github/skills",
-        ownership_root=".github/copilot",
-        detect_paths=(".github/agents", ".github/copilot", ".github/prompts"),
-        invocation_dir=".github/agents",
-        invocation_suffix=".agent.md",
-        caveat=NO_GUARDS,
     ),
     Host(
         id="pi",

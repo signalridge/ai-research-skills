@@ -17,7 +17,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import re
 import shutil
 import sys
 from typing import Any
@@ -188,50 +187,6 @@ def copy_skill(src: str, dst: str, host: hosts.Host) -> None:
                 shutil.copy2(source, target)
 
 
-def skill_description(skill: str) -> str:
-    """First line of a skill's frontmatter description, for invocation stubs."""
-    path = os.path.join(SRC_CLAUDE, "skills", skill, "SKILL.md")
-    with open(path, encoding="utf-8") as fh:
-        text = fh.read()
-    match = re.search(
-        r"^description:\s*>?-?\s*\n?((?:.|\n)*?)(?=\n[a-z-]+:|\n---)", text, re.M
-    )
-    if not match:
-        return skill
-    return " ".join(match.group(1).split())[:300]
-
-
-def write_invocation_stubs(root: str, host: hosts.Host) -> str | None:
-    """Hosts whose skills directory is not directly callable need a thin file that
-    points back at the SKILL.md. Paths and include syntax follow host distribution reference's adapter,
-    which verified them per host.
-
-    Caveat worth knowing: these skills are multi-file — SKILL.md plus six reference
-    files loaded on demand. Whether a host follows relative links out of an included
-    body is unverified for every host in this branch.
-    """
-    if not host.invocation_dir:
-        return None
-    dst = os.path.join(root, host.invocation_dir)
-    os.makedirs(dst, exist_ok=True)
-    for skill in SKILLS:
-        target = f"{host.skills_dir}/{skill}/SKILL.md"
-        description = skill_description(skill)
-        if host.id == "copilot":
-            front = (
-                f"---\nname: {skill}\ndescription: {description!r}\n"
-                "disable-model-invocation: true\n---\n\n"
-            )
-        else:
-            front = f"---\ndescription: {description!r}\n---\n\n"
-        body = host.include.format(path=target) + "\n"
-        with open(
-            os.path.join(dst, skill + host.invocation_suffix), "w", encoding="utf-8"
-        ) as fh:
-            fh.write(front + body)
-    return f"{host.invocation_dir}/"
-
-
 def install_files(root: str, host: hosts.Host) -> list[str]:
     """Copy the suite into one host's tree. Skills and support files everywhere;
     commands and hooks only where the host has a surface for them."""
@@ -244,10 +199,6 @@ def install_files(root: str, host: hosts.Host) -> list[str]:
             host,
         )
     done.append(f"{host.skills_dir}/")
-
-    stub = write_invocation_stubs(root, host)
-    if stub:
-        done.append(stub)
 
     if host.commands_dir:
         dst = os.path.join(root, host.commands_dir)
@@ -296,12 +247,6 @@ def remove_files(root: str, host: hosts.Host) -> None:
             if os.path.exists(path):
                 os.remove(path)
 
-    if host.invocation_dir:
-        for skill in SKILLS:
-            path = os.path.join(root, host.invocation_dir, skill + host.invocation_suffix)
-            if os.path.exists(path):
-                os.remove(path)
-
     if host.hooks:
         for name in HOOK_SCRIPTS:
             path = os.path.join(root, host.ownership_root, "hooks", name)
@@ -313,12 +258,7 @@ def remove_files(root: str, host: hosts.Host) -> None:
     )
 
     # Leave no empty shells behind, but never remove a directory the user put things in.
-    for rel in (
-        host.skills_dir,
-        host.commands_dir,
-        host.invocation_dir,
-        f"{host.ownership_root}/hooks",
-    ):
+    for rel in (host.skills_dir, host.commands_dir, f"{host.ownership_root}/hooks"):
         if not rel:
             continue
         path = os.path.join(root, rel)

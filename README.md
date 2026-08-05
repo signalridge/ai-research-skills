@@ -29,14 +29,13 @@ uvx --from ~/ghq/github.com/signalridge/research-skills research-skills install 
 ```
 
 It installs into whichever agents the project already uses — **claude, codex, cursor,
-qwen, opencode, windsurf, kilo, kiro, copilot, pi, kimi** — or Claude Code if it uses
-none. Scope it with `--host claude,codex`. Hosts whose skills directory is not directly
-callable also get a thin invocation file (`.windsurf/workflows/`, `.kiro/steering/`,
-`.github/agents/`, …) pointing back at the skill. `uninstall` removes only what it wrote and leaves hooks you
+pi, kimi** — or Claude Code if it uses none. Scope it with `--host claude,codex`. `uninstall` removes only what it wrote and leaves hooks you
 added yourself alone; `doctor` checks each host item by item.
 
-**Skills port everywhere; the guardrails reach four hosts.** They need an event that
-fires before a file is written and a way to deny it:
+**Four of the five hosts run the guardrails.** A host earns a place here by having a
+verified way to enforce, not just to read skills — adapters that could only drop
+markdown into a directory were removed, because the design rests on enforcement being
+real and a skills-only install hands you a false sense of it.
 
 | Host | Config written for you | Note |
 |---|---|---|
@@ -44,11 +43,11 @@ fires before a file is written and a way to deny it:
 | codex | `.codex/hooks.json` | events at top level, not nested |
 | cursor | `.cursor/hooks.json` | camelCase events; `version` is required or none load |
 | pi | `.pi/settings.json` | inert until `pi install npm:@hsingjui/pi-hooks` |
+| kimi | — | skills only; no verified hook contract |
 
 The guards emit both deny dialects — `hookSpecificOutput` for Claude/Codex, a flat
-`permission` field for Cursor — so one implementation covers all four. On the remaining
-seven hosts you get the methodology without the enforcement, and the installer says so
-rather than letting you assume otherwise.
+`permission` field for Cursor — so one implementation covers all four. Kimi gets the
+methodology without the enforcement, and the installer says so.
 
 Search backends are configured separately — see **[docs/SETUP.md](docs/SETUP.md)**. The
 `arxiv` MCP server is required; `openalex` and `tavily` are strongly recommended.
