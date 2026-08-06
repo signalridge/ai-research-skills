@@ -20,6 +20,7 @@ Exit 0 all green, 1 on any failure.
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import pathlib
@@ -46,6 +47,21 @@ EXAMPLE = os.path.join(
 
 passed = 0
 failed: list[str] = []
+skipped: list[str] = []
+
+
+def have(module: str) -> bool:
+    return importlib.util.find_spec(module) is not None
+
+
+# rs_validate is the one shipped script that is NOT stdlib-only: it exits 2 with install
+# instructions when PyYAML is absent, by design. run_validate shells out to sys.executable,
+# so what matters is whether *this* interpreter has it. Without this probe every validator
+# assertion fails on a bare interpreter and the suite reports 16 red checks for a dependency
+# that was never claimed — which is how CI stayed red on 3.10/3.11/3.13 while passing on the
+# one version that happened to match the dev venv.
+HAVE_YAML = have("yaml")
+HAVE_JSONSCHEMA = have("jsonschema")
 
 
 def check(name: str, ok: bool, detail: str = "") -> None:
@@ -56,6 +72,11 @@ def check(name: str, ok: bool, detail: str = "") -> None:
     else:
         failed.append(name)
         print(f"  FAIL {name}" + (f"\n         {detail}" if detail else ""))
+
+
+def skip(section: str, why: str) -> None:
+    skipped.append(section)
+    print(f"  SKIP {section} — {why}")
 
 
 def run_hook(script: str, payload) -> tuple[int, str, str]:
@@ -362,6 +383,14 @@ def run_validate(path: str) -> tuple[int, str]:
 def test_validator() -> None:
     print("\nvalidator")
 
+    if not HAVE_YAML:
+        skip(
+            "validator",
+            "rs_validate needs PyYAML and this interpreter has none. The hooks, which "
+            "must run in whatever python3 the user has, are stdlib-only and ran above",
+        )
+        return
+
     rc, out = run_validate(BROKEN)
     check("broken fixture exits nonzero", rc == 1, f"rc={rc}")
 
@@ -384,9 +413,7 @@ def test_validator() -> None:
     for label, needle in expected:
         check(f"catches defect {label}", needle in out, f"missing {needle!r}")
 
-    try:
-        import jsonschema  # noqa: F401
-
+    if HAVE_JSONSCHEMA:
         # iter_errors surfaces every violation; validate() would stop at the first and
         # hide this one behind the queries_run error earlier in the same document.
         check(
@@ -399,8 +426,8 @@ def test_validator() -> None:
             out.count("schema violation") > 1,
             f"only {out.count('schema violation')} schema violations reported",
         )
-    except ImportError:
-        pass
+    else:
+        skip("structural schema checks", "no jsonschema; semantic checks still ran")
 
     rc, out = run_validate(EXAMPLE)
     check(
@@ -835,12 +862,11 @@ def test_hosts(tmp: str) -> None:
 
 def main() -> int:
     print(f"ai-research-skills tests  (python {sys.version.split()[0]})")
-    try:
-        import jsonschema  # noqa: F401
-
-        print("structural checks: enabled")
-    except ImportError:
-        print("structural checks: SKIPPED (no jsonschema) — semantic checks still run")
+    print(f"pyyaml: {'present' if HAVE_YAML else 'ABSENT — validator layer will skip'}")
+    print(
+        "structural checks: "
+        + ("enabled" if HAVE_JSONSCHEMA else "SKIPPED (no jsonschema)")
+    )
 
     with tempfile.TemporaryDirectory() as tmp:
         test_hooks(tmp)
@@ -852,9 +878,14 @@ def main() -> int:
     with tempfile.TemporaryDirectory() as tmp:
         test_doctor(tmp)
 
-    print(f"\n{passed} passed, {len(failed)} failed")
+    tail = f", {len(skipped)} skipped" if skipped else ""
+    print(f"\n{passed} passed, {len(failed)} failed{tail}")
     for f in failed:
         print(f"  - {f}")
+    # Name what did not run. A green line that quietly covered less than the last one is
+    # the same failure this suite exists to catch in surveys.
+    for s in skipped:
+        print(f"  ~ skipped: {s}")
     return 1 if failed else 0
 
 

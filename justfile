@@ -15,9 +15,14 @@ sync:
 test:
     uv run --group dev python tests/run_tests.py
 
-# The path users actually hit: hooks must work in a bare python3 with no packages
+# The path users actually hit: hooks must work in a bare python3 with no packages.
+#
+# Run from elsewhere on purpose. `uv run --no-project` still discovers ./.venv when the
+# cwd is the project, so this recipe used to reuse the dev toolchain and pass locally
+# while the same command failed in CI, where no venv exists. `--python 3.13` pins an
+# interpreter the project venv cannot satisfy, so uv has to provision a clean one.
 test-bare:
-    uv run --no-project python tests/run_tests.py
+    cd "$(mktemp -d)" && uv run --no-project --python 3.13 python {{justfile_directory()}}/tests/run_tests.py
 
 lint:
     uv run --group dev ruff check src/ tests/ install.py
