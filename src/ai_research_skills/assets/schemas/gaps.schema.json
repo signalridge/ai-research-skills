@@ -123,6 +123,15 @@
             "minLength": 20,
             "description": "The falsifier, written in advance. `ars-watch` re-tests this against every new paper. Without it a gap closes silently while you are six months into closing it yourself."
           },
+          "closes_if_met": {
+            "$ref": "#/$defs/closure",
+            "description": "Optional typed closure recorded by ars-watch when the falsifier is met."
+          },
+          "threats": {
+            "type": "array",
+            "items": {"$ref": "#/$defs/threat"},
+            "description": "Optional near-misses: a paper addresses part of closes_if while unmet_clause remains."
+          },
           "verdict": {
             "type": "object",
             "description": "Written by gap-gate. Absent until the gate runs.",
@@ -152,6 +161,26 @@
     }
   },
   "$defs": {
+    "closure": {
+      "type": "object",
+      "required": ["key", "date", "rationale"],
+      "additionalProperties": false,
+      "properties": {
+        "key": {"type": "string"},
+        "date": {"type": "string", "format": "date"},
+        "rationale": {"type": "string", "minLength": 5}
+      }
+    },
+    "threat": {
+      "type": "object",
+      "required": ["key", "date", "unmet_clause"],
+      "additionalProperties": false,
+      "properties": {
+        "key": {"type": "string"},
+        "date": {"type": "string", "format": "date"},
+        "unmet_clause": {"type": "string", "minLength": 3}
+      }
+    },
     "gate": {
       "type": "object",
       "required": [

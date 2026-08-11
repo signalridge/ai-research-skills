@@ -2,17 +2,24 @@
 name: ars-verify
 description: >
   Check citation and number integrity across a survey and anything drafted from it — every
-  BibTeX entry tool-generated and resolvable, every cited key present in the corpus, every
+  BibTeX entry attested and externally resolvable, every cited key present in the corpus, every
   quoted number traceable to a named table or figure, and preprint-versus-published drift
   flagged. Use when the user asks to check citations, verify references, confirm numbers,
   or audit a draft before submission.
 disallowed-tools:
-  # Verification resolves identifiers against arxiv/openalex — those are lookups, not
-  # searches, so they stay. Broad web search is removed: an entry that only a web search
-  # can corroborate is exactly the entry that should be reported as unresolvable.
+  # Verification may inspect only identifiers already present in state. Search, graph,
+  # trend and alert tools remain denied; missing evidence goes back to ars-survey.
   - WebSearch
   - WebFetch
   - mcp__tavily
+  - mcp__arxiv__search_papers
+  - mcp__arxiv__semantic_search
+  - mcp__arxiv__citation_graph
+  - mcp__arxiv__watch_topic
+  - mcp__arxiv__check_alerts
+  - mcp__openalex__search_entities
+  - mcp__openalex__analyze_trends
+  - mcp__openalex__get_citation_graph
 ---
 
 # verify — citations and numbers
@@ -20,24 +27,27 @@ disallowed-tools:
 Mechanical, deterministic, and the cheapest insurance in the suite. Fabricated citations
 are the most common failure of LLM literature work; wrong numbers are the most damaging.
 
-Scope: **integrity, not quality.** Whether the argument is good is `ars-red-team`'s job.
+Scope: **integrity, not quality or discovery.** Resolve only a stable identifier already
+present in the corpus (ID, DOI, PMID or PMCID); never turn a missing identifier into a title
+search or citation-graph walk. If state lacks a resolvable identifier, route the gap back to
+`ars-survey`; argument quality is `ars-red-team`'s job.
 
 ---
 
 ## 1. BibTeX provenance
 
-Every `.bib` in scope must carry the provenance header written by `export_citations`, and
-every entry must be tool-generated.
+Every `.bib` entry in scope must carry a strict `rs-provenance` attestation binding its
+corpus key, stable identifier, tool and date. This is not cryptographic proof and cannot
+establish which process wrote the bytes; external identifier lookup below is the real check.
 
 ```bash
 head -3 .research/survey/<slug>/refs.bib     # expect an rs-provenance line
 ```
 
-A `.bib` with entries and no provenance header is **critical**: it was hand-written, which
-means the fields are model-generated, which means they are plausible and possibly wrong —
-right-looking authors, adjacent year, a journal that never published it.
-
-Fix by regenerating, never by correcting in place:
+A `.bib` entry without a strict per-entry attestation is **critical**. A legacy file-level
+marker may grandfather unchanged old entries only; it cannot authorise appended or modified
+entries. This check is a defensive tripwire, not proof of tool origin — attestations can be
+forged — so fix by regenerating and then resolving identifiers externally:
 
 ```
 arxiv → export_citations(paper_ids: [...])
@@ -49,7 +59,7 @@ For each entry, confirm the work exists and the metadata matches:
 
 ```
 arxiv → get_abstract(paper_id: "2503.01234")             # arXiv works
-openalex → openalex_resolve_name(query: "10.1145/…")     # DOI works — singleton, free
+openalex → openalex_resolve_name(query: "10.1145/…")     # DOI works — singleton; record returned cost
 ```
 
 Check title, first author, year, venue. Flag any mismatch. A title that is close but not
@@ -77,7 +87,8 @@ references get destroyed.
 draft \cite{key}  →  refs.bib entry  →  corpus.jsonl record
 ```
 
-All three must agree. Report:
+All three must agree. This lookup is read-only; do not use it to add a new record. Missing
+records go back to `ars-survey`. Report:
 
 - **cited but not in corpus** — critical. The claim rests on a paper the survey never
   screened.

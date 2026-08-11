@@ -89,11 +89,126 @@ MIN_QUERIES = 3
 it exists to enforce does not just miss cases — it teaches the rule wrong, because the
 author who gets through learns that one phrasing was enough."""
 
-# The `- item` lines under one queries_run key. Horizontal whitespace only, so the match
-# stops at the next key (`venues_swept:`) instead of running on through the document and
-# pooling every gap's queries into one count.
-QUERIES_RE = re.compile(r"queries_run:[ \t]*\n((?:[ \t]*-[ \t]*\S.*\n?)+)")
-ITEM_RE = re.compile(r"^[ \t]*-[ \t]*\S", re.MULTILINE)
+# Parse only the queries_run list inside each top-level gap.  The guard deliberately
+# supports the small YAML shape it needs rather than pooling matching list lines from
+# unrelated gaps or accepting arbitrary prose as evidence.
+GAP_START_RE = re.compile(r"^(?P<indent>[ \t]*)-[ \t]+id\s*:")
+KEY_RE = re.compile(
+    r"^(?P<indent>[ \t]*)(?P<key>evidence_of_absence|queries_run)\s*:\s*(?P<value>.*)$"
+)
+LIST_ITEM_RE = re.compile(r"^(?P<indent>[ \t]*)-[ \t]+(?P<value>\S.*)$")
+
+
+def _indent(line: str) -> int:
+    return len(line) - len(line.lstrip(" \t"))
+
+
+def _normalise_query(value: str) -> str:
+    value = value.strip()
+    quote: str | None = None
+    escaped = False
+    for index, character in enumerate(value):
+        if quote is not None:
+            if escaped:
+                escaped = False
+            elif character == "\\" and quote == '"':
+                escaped = True
+            elif character == quote:
+                quote = None
+        elif character in "'\"":
+            quote = character
+        elif character == "#" and (index == 0 or value[index - 1].isspace()):
+            value = value[:index].rstrip()
+            break
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
+        value = value[1:-1]
+    return re.sub(r"\s+", " ", value).strip().casefold()
+
+
+def _inline_queries(value: str) -> list[str]:
+    value = value.strip()
+    if not (value.startswith("[") and value.endswith("]")):
+        return []
+    chunks: list[str] = []
+    current: list[str] = []
+    quote: str | None = None
+    escaped = False
+    for character in value[1:-1]:
+        if quote is not None:
+            current.append(character)
+            if escaped:
+                escaped = False
+            elif character == "\\" and quote == '"':
+                escaped = True
+            elif character == quote:
+                quote = None
+        elif character in "'\"":
+            quote = character
+            current.append(character)
+        elif character == ",":
+            chunks.append("".join(current))
+            current = []
+        else:
+            current.append(character)
+    if quote is not None:
+        return []
+    chunks.append("".join(current))
+    return [query for chunk in chunks if (query := _normalise_query(chunk))]
+
+
+def _gap_blocks(text: str) -> list[list[str]]:
+    lines = text.splitlines()
+    starts = [
+        (index, _indent(line))
+        for index, line in enumerate(lines)
+        if GAP_START_RE.match(line)
+    ]
+    blocks: list[list[str]] = []
+    for position, (start, gap_indent) in enumerate(starts):
+        end = len(lines)
+        for candidate, candidate_indent in starts[position + 1 :]:
+            if candidate_indent == gap_indent:
+                end = candidate
+                break
+        blocks.append(lines[start:end])
+    return blocks
+
+
+def _gap_queries(block: list[str]) -> list[str]:
+    if not block:
+        return []
+    for index, line in enumerate(block):
+        evidence = KEY_RE.match(line)
+        if not evidence or evidence.group("key") != "evidence_of_absence":
+            continue
+        evidence_indent = _indent(line)
+        end = len(block)
+        for candidate in range(index + 1, len(block)):
+            if block[candidate].strip() and _indent(block[candidate]) <= evidence_indent:
+                end = candidate
+                break
+        for query_index in range(index + 1, end):
+            query = KEY_RE.match(block[query_index])
+            if not query or query.group("key") != "queries_run":
+                continue
+            query_indent = _indent(block[query_index])
+            inline = query.group("value").strip()
+            if inline:
+                return _inline_queries(inline)
+            values: list[str] = []
+            for item_line in block[query_index + 1 : end]:
+                if not item_line.strip():
+                    continue
+                if _indent(item_line) <= query_indent:
+                    break
+                item = LIST_ITEM_RE.match(item_line)
+                if not item:
+                    break
+                value = _normalise_query(item.group("value"))
+                if value:
+                    values.append(value)
+            return values
+    return []
 
 
 def gaps_evidence_state(survey_dirs):
@@ -115,11 +230,7 @@ def gaps_evidence_state(survey_dirs):
                 text = fh.read()
         except OSError:
             continue
-        if "evidence_of_absence:" not in text:
-            continue
-        if any(
-            len(ITEM_RE.findall(block)) >= MIN_QUERIES for block in QUERIES_RE.findall(text)
-        ):
+        if any(len(set(_gap_queries(block))) >= MIN_QUERIES for block in _gap_blocks(text)):
             backed = True
     return found, backed
 
@@ -129,31 +240,9 @@ def main() -> None:
     cwd = payload.get("cwd") or os.getcwd()
     tool_input = payload.get("tool_input") or {}
 
-    paths = [p for p in _payload.targets(tool_input) if p.endswith(WATCHED_SUFFIXES)]
-    if not paths:
-        return
-    path = paths[0]
-
-    text = _payload.written_text(tool_input)
-    if not text:
-        return
-
     surveys = find_surveys(cwd)
     if not surveys:
         return  # not a survey project — stay quiet
-
-    hits = []
-    for line in text.splitlines():
-        m = PATTERN_RE.search(line)
-        if m:
-            snippet = line.strip()
-            if len(snippet) > 160:
-                snippet = snippet[:157] + "..."
-            hits.append(f'  "{snippet}"')
-        if len(hits) >= 4:
-            break
-    if not hits:
-        return
 
     found, backed = gaps_evidence_state(surveys)
     if backed:
@@ -166,12 +255,34 @@ def main() -> None:
         f"phrasings an absence claim needs under evidence_of_absence.queries_run."
     )
 
-    json.dump(
-        _payload.block(
-            REASON.format(path=path, quotes="\n".join(hits), diagnosis=diagnosis)
-        ),
-        sys.stdout,
-    )
+    # A tool call may contain several Pi edits or a multi-file apply_patch.  Inspect every
+    # operation independently; using paths[0] lets a safe first file hide a prose claim in
+    # a later file and using one joined text lets evidence from one file authorise another.
+    for operation in _payload.operations(tool_input):
+        if not operation.path.endswith(WATCHED_SUFFIXES) or not operation.text:
+            continue
+        hits = []
+        for line in operation.text.splitlines():
+            m = PATTERN_RE.search(line)
+            if m:
+                snippet = line.strip()
+                if len(snippet) > 160:
+                    snippet = snippet[:157] + "..."
+                hits.append(f'  "{snippet}"')
+            if len(hits) >= 4:
+                break
+        if hits:
+            json.dump(
+                _payload.block(
+                    REASON.format(
+                        path=operation.path,
+                        quotes="\n".join(hits),
+                        diagnosis=diagnosis,
+                    )
+                ),
+                sys.stdout,
+            )
+            return
 
 
 if __name__ == "__main__":

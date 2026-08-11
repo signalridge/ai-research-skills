@@ -13,9 +13,9 @@ Find candidates four different ways. Log every query verbatim.
 Each mode is structurally blind to what the others find.
 
 - **Keyword** misses papers that solve your problem under a name you did not guess.
-  Terminology in CS/ML drifts faster than it standardizes: *content moderation* =
-  *safety filtering* = *NSFW detection*; *chain-of-thought* = *scratchpad* =
-  *intermediate reasoning*.
+  Terminology in CS/ML drifts faster than it standardizes, so generate alternatives such as
+  *extended-context* / *large-window* or *multi-stage retrieval* / *retrieval loop* rather
+  than repeating the question's wording.
 - **Citation chaining** is terminology-blind — it follows what authors thought was related,
   which is exactly the signal keyword search cannot see. Usually the highest-recall mode,
   and if it contributes nothing to your includes, your search is keyword-shaped.
@@ -66,14 +66,16 @@ Then the same concept through OpenAlex, which indexes non-arXiv venues:
 ```
 openalex → openalex_search_entities(
   entity_type: "works",
-  search: '"multi-hop" AND "retrieval"',
+  query: '"multi-hop" AND "retrieval"',
+  search_mode: "keyword",
   filters: {"publication_year": "2023-2026"},
   per_page: 100
 )
 ```
 
-Always `per_page: 100`. Cost is per call, not per result — paginating at the default 25
-costs 4× for identical data.
+Use `per_page: 100` for keyword/exact/list searches when the tool schema permits it. Semantic
+search is capped at 50 and rate-limited to about one request per second. Cost is per call,
+not per result; record the returned budget metadata rather than assuming a fixed saving.
 
 Finally the places neither indexes — workshop pages, proceedings front matter, engineering
 blogs, community-curated awesome-lists:
@@ -153,9 +155,10 @@ openalex → openalex_resolve_name(query: "International Conference on Learning 
 
 openalex → openalex_search_entities(
   entity_type: "works",
+  query: "retrieval",
+  search_mode: "keyword",
   filters: {"primary_location.source.id": "S<id>",
-            "publication_year": "2025-2026",
-            "title_and_abstract.search": "retrieval"},
+            "publication_year": "2025-2026"},
   per_page: 100
 )
 ```

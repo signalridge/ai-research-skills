@@ -1,16 +1,19 @@
-% rs-provenance: tool=arxiv.export_citations date=2026-08-03
-% ILLUSTRATIVE EXAMPLE — synthetic entries. Never hand-write this file; the
-% bib_provenance_guard hook blocks .bib writes that lack this header.
+% ILLUSTRATIVE EXAMPLE — synthetic entries.  These attestations bind each entry to the
+% corresponding corpus key and stable identifier.  They are integrity metadata, not
+% cryptographic proof; ars-verify must resolve the identifiers externally.
+% rs-provenance: key=alpha2025iterative id=arXiv:2500.00001 tool=arxiv.export_citations date=2026-08-03
 @inproceedings{alpha2025iterative,
   title     = {Iterative Retrieval for Multi-Hop Question Answering},
   booktitle = {ICLR},
   year      = {2026}
 }
+% rs-provenance: key=beta2025longctx id=arXiv:2500.00002 tool=arxiv.export_citations date=2026-08-03
 @inproceedings{beta2025longctx,
   title     = {Long-Context Models Are Strong Multi-Hop Reasoners},
   booktitle = {NeurIPS},
   year      = {2025}
 }
+% rs-provenance: key=gamma2026threehop id=arXiv:2600.00003 tool=arxiv.export_citations date=2026-08-03
 @misc{gamma2026threehop,
   title = {Scaling Multi-Hop Depth},
   year  = {2026},

@@ -1,5 +1,4 @@
-# ILLUSTRATIVE EXAMPLE. Axes are copied VERBATIM from protocol.yml — if they differ,
-# the taxonomy was built after searching and every empty cell is an artifact.
+# ILLUSTRATIVE EXAMPLE — complete 2 x 3 x 2 Cartesian grid. Axes are copied verbatim.
 axes:
   - name: method
     values: [iterative retrieval, long-context]
@@ -8,43 +7,49 @@ axes:
   - name: evaluation
     values: [2-hop, 3+-hop]
 cells:
-  - coords: {method: iterative retrieval, control: fixed token budget, evaluation: 2-hop}
-    occupants: [alpha2025iterative]
-    state: occupied
-  - coords: {method: long-context, control: fixed token budget, evaluation: 2-hop}
-    occupants: [beta2025longctx]
-    state: occupied
+  - coords: {method: iterative retrieval, control: none, evaluation: 2-hop}
+    occupants: []
+    state: undecided
   - coords: {method: iterative retrieval, control: none, evaluation: 3+-hop}
     occupants: [gamma2026threehop]
     state: occupied
-  # The gap. Empty, and discriminated — neighbours are live, so unexplored not abandoned.
+  - coords: {method: iterative retrieval, control: fixed token budget, evaluation: 2-hop}
+    occupants: [alpha2025iterative]
+    state: occupied
+  - coords: {method: iterative retrieval, control: fixed token budget, evaluation: 3+-hop}
+    occupants: []
+    state: undecided
   - coords: {method: iterative retrieval, control: fixed retrieval recall, evaluation: 2-hop}
     occupants: []
     state: unexplored
-    trend_evidence: "Neighbour cells (fixed token budget, 2-hop) grew 2023:12 -> 2025:180 works and are still rising in 2026. The area is live; this control is simply untried."
+    trend_evidence: "Neighbour cells are active in the synthetic protocol; this exact control is untried."
     gap_id: G1
-  - coords: {method: long-context, control: fixed retrieval recall, evaluation: 2-hop}
-    occupants: []
-    state: unexplored
-    trend_evidence: "Same neighbourhood as above; the long-context arm of the same missing comparison."
-    gap_id: G1
-  # `avoided`, not `abandoned` — the distinction that decides G2. Work here stopped, but
-  # papers keep naming it as future work without attempting it. Scores 5, not 1.
-  - coords: {method: long-context, control: none, evaluation: 3+-hop}
-    occupants: []
-    state: avoided
-    trend_evidence: "Neighbour volume flat since 2024, so the work stopped — but four papers across 2024-2026 (alpha2025iterative §7, beta2025longctx §6, gamma2026threehop §5, and two outside the corpus) name 3+-hop long-context evaluation as future work or a known limitation, and none attempt it. Nobody reports trying and failing. Field is routing around it, not past it."
-    gap_id: G2
   - coords: {method: iterative retrieval, control: fixed retrieval recall, evaluation: 3+-hop}
     occupants: []
     state: undecided
+  - coords: {method: long-context, control: none, evaluation: 2-hop}
+    occupants: []
+    state: undecided
+  - coords: {method: long-context, control: none, evaluation: 3+-hop}
+    occupants: []
+    state: avoided
+    trend_evidence: "The field repeatedly names deeper long-context evaluation as future work but no synthetic record attempts it."
+    gap_id: G2
+  - coords: {method: long-context, control: fixed token budget, evaluation: 2-hop}
+    occupants: [beta2025longctx]
+    state: occupied
+  - coords: {method: long-context, control: fixed token budget, evaluation: 3+-hop}
+    occupants: []
+    state: undecided
+  - coords: {method: long-context, control: fixed retrieval recall, evaluation: 2-hop}
+    occupants: []
+    state: unexplored
+    trend_evidence: "The matching-control comparison is absent for the long-context arm too."
+    gap_id: G1
   - coords: {method: long-context, control: fixed retrieval recall, evaluation: 3+-hop}
     occupants: []
     state: undecided
 recall_diagnostic:
-  # Counted over the three includes only; a record can be found by more than one mode, so
-  # these do not sum to the include count. venue_author surfaced epsilon2026workshop, which
-  # is `unsure` — counting it here as an include would overstate what that mode delivered.
   includes_by_mode: {keyword: 2, citation_chain: 1, venue_author: 0, contrarian: 1}
-  unsure_by_mode: {venue_author: 1}
-  note: "All four modes contributed something, but only three contributed an include — venue_author's single hit is still unadjudicated. beta2025longctx came only from the contrarian pass: keyword search used the mainstream vocabulary and the citation chains never reached it, because the papers it contradicts do not cite it. Dropping Mode D would have produced a survey reporting a consensus that does not exist."
+  unsure_by_mode: {keyword: 0, citation_chain: 0, venue_author: 1, contrarian: 0}
+  note: "All four modes are visible: the contrarian record disagrees with alpha, while venue_author's only hit remains unsure."

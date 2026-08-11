@@ -16,6 +16,8 @@ import os
 import re
 import sys
 
+import _payload
+
 STALE_DAYS = 30
 
 DATE_RE = re.compile(r"^\s*last_searched_at:\s*['\"]?(\d{4}-\d{2}-\d{2})", re.MULTILINE)
@@ -96,15 +98,7 @@ def main() -> None:
         "re-dates every gap.",
     ]
 
-    json.dump(
-        {
-            "hookSpecificOutput": {
-                "hookEventName": "SessionStart",
-                "additionalContext": "\n".join(lines),
-            }
-        },
-        sys.stdout,
-    )
+    json.dump(_payload.session_context("SessionStart", "\n".join(lines)), sys.stdout)
 
 
 if __name__ == "__main__":

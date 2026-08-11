@@ -6,7 +6,8 @@ argument-hint: "[survey slug]"
 Run the `ars-related-work` skill for: **$ARGUMENTS**
 
 Requires a completed survey with `corpus.jsonl` includes carrying `claim` and
-`evidence_read`, plus a tool-generated `refs.bib`.
+`evidence_read`, plus an attested `refs.bib` whose entries bind key/id/tool/date. This is a
+read-only projection; identifier gaps go back to `/ars-survey`.
 
 **Never search here.** A missing paper goes back to `/ars-survey`.
 

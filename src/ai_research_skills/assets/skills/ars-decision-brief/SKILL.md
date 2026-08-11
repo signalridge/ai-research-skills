@@ -14,7 +14,8 @@ disallowed-tools:
   - WebSearch
   - WebFetch
   - mcp__tavily
-  - mcp__arxiv-mcp-server
+  - mcp__arxiv
+  - mcp__arxiv-mcp-server  # legacy registration name
   - mcp__openalex
 ---
 
@@ -27,7 +28,8 @@ be betting on, and what breaks if it is wrong?**
 
 `protocol.yml` at `phase >= 3`, includes carrying `claim`, `code`, and `numbers`.
 
-**Never search here.** Missing evidence goes back to `ars-survey`.
+**Never search here.** This is a read-only projection of survey state; it must not append
+corpus records or mutate protocol/coverage/gaps. Missing evidence goes back to `ars-survey`.
 
 Ask the user for the decision context first — what they are building, what the alternative
 is, what the cost of being wrong is. A brief written without it answers a question nobody
@@ -91,9 +93,10 @@ is exactly what a literature survey is for.
 | `revisit after <trigger>` | Not decidable yet. **Name the trigger.** |
 
 `revisit` must be falsifiable and watchable: "revisit if an independent replication at
-≥64k context appears." Then add it to `gaps.yml` as a `closes_if` so `ars-watch` tests it
-automatically. This is how an engineering decision stays connected to the literature
-instead of being re-litigated from memory in six months.
+≥64k context appears." Record that proposed trigger in `brief.md` and hand it back to
+`ars-survey`, which may register it in `gaps.yml` as a `closes_if`. Once registered,
+`ars-watch` tests it automatically. This is how an engineering decision stays connected
+to the literature instead of being re-litigated from memory in six months.
 
 ## Output
 
@@ -113,7 +116,7 @@ Survey <slug> · corpus frozen <date> · <n> includes · brief generated <date>
 <the claims with weakest support that the design still depends on>
 
 ## What to watch
-<triggers, wired into gaps.yml closes_if>
+<proposed triggers; `ars-survey` registers accepted ones in `gaps.yml` as `closes_if`>
 
 ## Coverage and limits
 <adjudicated vs retrieved; evidence_read distribution; what the survey did not cover>
@@ -127,9 +130,11 @@ evidence auditable underneath it.
 
 ## Handoffs
 
-- **Upstream:** reads `corpus.jsonl` — claims, code status, sourced numbers — written by
-  `ars-survey`.
-- **Writes:** `brief.md`, the claim→evidence matrix.
-- **Downstream:** `ars-watch` tests the revisit triggers the brief registers; `ars-verify`
-  checks that every number in the matrix traces to a table.
+- **Upstream:** reads `corpus.jsonl` and `gaps.yml` — claims, code status, sourced numbers
+  and existing gaps — written by `ars-survey`.
+- **Writes:** `brief.md` only — the claim→evidence matrix and proposed revisit triggers. It
+  is a read-only projection and never edits the source ledgers or performs discovery.
+- **Downstream:** proposed triggers go back to `ars-survey` for registration; after that,
+  `ars-watch` tests the registered `closes_if`. `ars-verify` checks that every number in
+  the matrix traces to a table.
 - Never searches. Missing evidence goes back to `ars-survey`.

@@ -16,14 +16,15 @@ disallowed-tools:
   - WebSearch
   - WebFetch
   - mcp__tavily
-  - mcp__arxiv-mcp-server
+  - mcp__arxiv
+  - mcp__arxiv-mcp-server  # legacy registration name
   - mcp__openalex
 ---
 
 # gap-gate — evidence for a decision you make
 
-Choosing what to work on is not a literature review. It is a decision under uncertainty:
-*given everything already known, what should I do next, and why is it defensible?*
+A gap dossier is not a literature review. It converts screened evidence into a bounded
+choice under uncertainty: which next action is defensible, and what evidence would change it?
 
 This skill assembles the evidence for that decision across three gates and **stops short of
 the verdict**. A go/no-go on months of your time is not a call to delegate.
@@ -40,6 +41,9 @@ screened is worse than no assessment.
 
 Check `evidence_of_absence.last_checked` on every gap. Older than 30 days in a fast-moving
 field means G1 is being scored against stale evidence; say so, and offer `ars-watch` first.
+If `closes_if_met: {key, date, rationale}` exists, the gap is closed and must not be scored;
+`threats: {key, date, unmet_clause}` are reported as partial evidence, never silently treated
+as closure. Both references must resolve to corpus records (the validator checks this).
 
 ---
 
@@ -115,9 +119,10 @@ already in `trend_evidence` — that is what makes the state worth so much.
 
 #### Shape probe — calibration, not a gate
 
-Four questions about what *kind* of contribution this is. **No score attaches.** Incremental
-work is the backbone of a research career and reaches top venues routinely; the probe exists
-so the framing matches the reality rather than to filter.
+Four questions about what *kind* of contribution this is. **No score attaches in ARS.** The
+probe is a framing aid: it prevents an empty cell from being presented as a breakthrough or
+a solid extension from being dismissed as trivial. It is not a gate or a substitute for the
+three evidence gates.
 
 1. **Hidden assumption.** Does closing this gap require the field to give up something it
    currently takes for granted? A specific assumption, nameable in one sentence — not "we
@@ -190,8 +195,9 @@ assume a lab GPU cluster, do not assume a laptop, and do not assume full-time.
 
 ## Output
 
-Write `.research/survey/<slug>/topic_dossier.md` and the `verdict` block back into
-`gaps.yml`.
+Write the read-only projection `.research/survey/<slug>/topic_dossier.md`. Do not mutate
+`corpus.jsonl`, `coverage.yml`, `gaps.yml`, or the frozen protocol; a verdict annotation is
+part of this projection, not an update to source state.
 
 ```markdown
 # Topic dossier — <topic>
@@ -296,7 +302,8 @@ of internal checking rituals.
 
 - **Upstream:** reads `coverage.yml`, `gaps.yml` and the corpus written by `ars-survey`;
   refuses to run below `phase: 4`.
-- **Writes:** `topic_dossier.md` next to the state, and verdict annotations on `gaps.yml`.
+- **Writes:** `topic_dossier.md` only, a read-only projection of survey state. It never
+  edits the source ledgers or searches; missing evidence goes back to `ars-survey`.
 - **Downstream:** the researcher's own go/no-go call — this skill withholds it.
   `ars-red-team` checkpoint B should pass before the dossier is trusted, and `ars-watch`
   keeps G1's freshness current.

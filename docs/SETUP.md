@@ -8,11 +8,36 @@ file covers installing and verifying them, plus the failure modes each one has t
 
 ## 1. Installed
 
+This section records the audited environment and gives a reproducible arXiv baseline. The
+Tavily entry is intentionally provider/client-specific; it is optional and must not be
+silently treated as verified evidence when unavailable.
+
 | Backend | Status | Config |
 |---|---|---|
-| `arxiv-mcp-server` | already present | user scope, `uv tool run arxiv-mcp-server` |
+| `arxiv-mcp-server` | already present; reviewed baseline 0.6.2 | user scope, `uv tool run --from arxiv-mcp-server==0.6.2 arxiv-mcp-server` |
 | `tavily` | already present | user scope |
 | **`openalex`** | **added 2026-08-03** | user scope, pinned `@cyanheads/openalex-mcp-server@0.7.8` |
+
+Runtime baselines from the audited packages: OpenAlex MCP 0.7.8 requires Node ≥24 or Bun
+≥1.3; arXiv MCP 0.6.2 requires Python ≥3.11. Optional `[pdf]` and `[pro]` extras are
+separate from the core arXiv install.
+
+For a fresh arXiv baseline, use the reviewed PyPI package and an explicit server name:
+
+```bash
+claude mcp add arxiv --scope user -- \
+  uvx --from arxiv-mcp-server==0.6.2 arxiv-mcp-server
+```
+
+When LaTeX source is unavailable, replace the command with the optional local PDF fallback:
+
+```bash
+uvx --from 'arxiv-mcp-server[pdf]==0.6.2' arxiv-mcp-server
+```
+
+The `[pro]` extra is not required; it adds a heavier local semantic index. A configured
+`markitdown-mcp` (`uvx markitdown-mcp`) is another optional PDF/Office/HTML fallback, not an
+ARS package dependency.
 
 The OpenAlex server was added with:
 
@@ -20,15 +45,23 @@ The OpenAlex server was added with:
 claude mcp add openalex --scope user -- npx -y @cyanheads/openalex-mcp-server@0.7.8
 ```
 
+The audited existing arXiv entry may still resolve `uv tool run arxiv-mcp-server` without a
+version constraint; use the explicit 0.6.2 command above when reproducing or reconfiguring it.
+Do not silently treat an unpinned executable as the reviewed baseline.
+
 Written to `~/.claude.json`. Version is **pinned** deliberately — an MCP server is a
 software distribution channel, and `@latest` means an unreviewed upgrade lands silently.
 Bump it consciously.
 
-Verify:
+Verify the configured entries:
 
 ```bash
-claude mcp list      # openalex: … - ✔ Connected
+claude mcp list      # arxiv/openalex: … - ✔ Connected; Tavily if configured
 ```
+
+For Tavily, use the provider's current MCP configuration and keep its API key in the
+client's secret/env mechanism. This document does not pin a hosted transport that could
+change independently of ARS.
 
 Tools exposed: `openalex_resolve_name`, `openalex_search_entities`,
 `openalex_analyze_trends`, `openalex_get_citation_graph`, `openalex_describe_fields`.
@@ -40,17 +73,18 @@ Tools exposed: `openalex_resolve_name`, `openalex_search_entities`,
 
 ## 2. OpenAlex API key
 
-**As of 2026-02-13 OpenAlex requires an API key.** The old `mailto=` polite pool is gone —
-the parameter is now *silently ignored*, so any guide (or MCP server README) still
-recommending it is stale. Most OpenAlex MCP servers on GitHub still document `mailto`;
-that is why this one was chosen.
+An API key is **optional for ordinary OpenAlex requests**. A live REST smoke test on
+2026-08-11 succeeded without a key, accepted `mailto`, and returned cost/budget headers.
+The `/rate-limit` endpoint is different: the same no-key test returned **HTTP 401
+Unauthorized**. Use a key when you need account/rate-limit inspection or the higher keyed
+allowance; do not make it a hidden prerequisite for the core survey path.
 
-The server works **without** a key right now, at the $0.10/day anonymous allowance — enough
-for testing, not enough for a survey sweep. A free key raises that 10×.
+`mailto` remains an optional courtesy identifier. It is not authentication, quota management,
+or a replacement for `api_key`; do not claim that it unlocks a special pool.
 
 ### Get one
 
-1. Create a free account at <https://openalex.org> (~30 seconds)
+1. Create an account at <https://openalex.org>
 2. Copy the key from <https://openalex.org/settings/api>
 
 ### Wire it in
@@ -69,50 +103,56 @@ claude mcp add openalex --scope user \
   -- npx -y @cyanheads/openalex-mcp-server@0.7.8
 ```
 
-Fallback if the `${VAR}` expansion doesn't resolve in your setup, substitute the literal key
-— but note it then sits in plaintext in `~/.claude.json`.
+Fallback if the `${VAR}` expansion does not resolve in your setup: substitute the literal key
+only if you accept that it will sit in plaintext in `~/.claude.json`. An entry with no
+`OPENALEX_API_KEY` remains valid but uses the anonymous allowance; inspect the actual client
+configuration rather than assuming the keyed budget.
 
-Confirm the key is live:
+Confirm the key and endpoint status (the payload/headers, not a hardcoded daily number, are
+the authority):
 
 ```bash
-curl -s "https://api.openalex.org/rate-limit?api_key=$OPENALEX_API_KEY" | python3 -m json.tool
-# daily_budget_usd should read 1, not 0.1
+curl -i -s "https://api.openalex.org/rate-limit?api_key=$OPENALEX_API_KEY"
 ```
 
 ---
 
 ## 3. Budget
 
-Cost is **per call, not per result**.
+Cost is **per call, not per result**, but response headers remain authoritative. The current
+schedule observed during this audit is: ID singleton **$0**, list/filter **$0.0001**,
+keyword or semantic search **$0.001**, with a **$0.10/day anonymous** allowance and a
+**$1/day keyed** allowance. Content download is separately metered; avoid it unless needed.
 
-| Operation | Cost / 1,000 calls |
+A nominal round of 20 keyword searches plus 200 list/filter calls is about **$0.04** under
+that schedule, not a promise for every protocol. Record returned `meta.cost_usd` when
+present, budget headers, query shape, server version and date.
+
+| Operation | Current observed category |
 |---|---|
-| Singleton (get by OpenAlex ID, DOI, PMID…) | **free** |
-| List + filter | $0.10 |
-| Keyword search | $1 |
-| Semantic search | $1 |
-| Content download (cached PDF) | $10 |
+| Singleton (get by OpenAlex ID, DOI, PMID…) | $0 in the current schedule |
+| List + filter | $0.0001/call |
+| Keyword or semantic search | $0.001/call; semantic page cap is smaller |
+| Content download | separately metered; inspect response |
 
-Free allowance: **$1/day with a key**, $0.10/day without. A full survey round (~20 searches
-plus a few hundred list/graph calls) runs about **$0.04**.
+Three habits keep spend bounded:
 
-Three habits keep it that way:
-
-1. **Always `per_page: 100`.** Paginating at the default 25 costs 4× for identical data.
-2. **Resolve once, reuse the ID.** Singletons are free; search is the priciest call. Cache
-   the `W…` id in `corpus.jsonl.openalex_id` and every later touch is free.
-3. **Watch the meter.** Every tool call reports what it spent and what remains. Record it in
-   `protocol.yml.budget` — a sweep that dies on a 429 halfway through has corrupted its own
-   saturation count.
-
-Every API response also carries `meta.cost_usd` if you're calling the REST API directly.
+1. **Use the largest legal page size.** `per_page: 100` is appropriate for keyword/exact/list
+   and citation-graph calls. Semantic search is capped at **50** and is rate-limited to about
+   one request per second; follow the tool schema rather than forcing 100.
+2. **Resolve once, reuse the ID.** Cache the `W…` id in `corpus.jsonl.openalex_id`; later
+   singleton/graph operations can avoid another search.
+3. **Watch the meter.** Record spend in `protocol.yml.budget`. A sweep that dies on a 429
+   halfway through has corrupted its own saturation count.
 
 ---
 
 ## 4. Verified failure modes
 
-These were reproduced against the live API on 2026-08-03. Each one produces a wrong or empty
-answer that **looks like a real answer** unless you check.
+These are failure modes reproduced against the live API (the identifier/graph probes ran on
+2026-08-03; key/budget behavior was rechecked on 2026-08-11). Response counts are snapshots,
+not current catalog facts. Each mode can produce a wrong or empty answer that **looks like a
+real answer** unless you check.
 
 ### 4.1 arXiv DOIs do not resolve
 
@@ -146,22 +186,19 @@ A plausible-looking `W2963403868` → 404. OpenAlex IDs are opaque. Every ID in
 
 ### 4.4 Citation counts are not comparable across sources
 
-OpenAlex reports 6,599 citations for *Attention Is All You Need*; Google Scholar reports
-six figures. Different corpora, different counting, and OpenAlex sometimes splits a work
-across records. **Never mix citation counts from two sources in one table**, and never use
-an absolute count as a quality threshold — use it only to rank within OpenAlex.
+The probe reported 6,599 OpenAlex citations for *Attention Is All You Need* while Google
+Scholar reported six figures. These are snapshots from different corpora, not stable current
+counts; OpenAlex can also split a work across records. **Never mix citation counts from two
+sources in one table**, and never use an absolute count as a quality threshold — use it only
+to rank within the same OpenAlex response.
 
 ### 4.5 The year histogram contains future dates
 
-`analyze_trends` grouped by `publication_year` on a live topic returned a `2028: 2` bucket.
-Records carry publisher-declared dates that can be wrong or forward-dated. Clamp to
-`<= current year` before computing a growth baseline.
-
-Also: the current year is always **partial**. The same query gave
-`2023: 323 → 2024: 3,236 → 2025: 9,915 → 2026: 14,086`, and 2026 was only two-thirds
-elapsed — so the real growth rate is *understated*, not overstated. This matters for
-[DESIGN.md rule 5](DESIGN.md#5-the-seventeen-rules-and-the-failure-each-one-traces-to): in a
-field tripling annually, "<5% new results this round" is stasis, not saturation.
+A prior `analyze_trends` probe returned at least one future-dated year bucket. Records carry
+publisher-declared dates that can be wrong or forward-dated. Clamp to `<= current year`
+before computing a growth baseline, and store the raw response with the protocol if the
+series matters. The current year is always partial; do not compare its count directly with a
+complete prior year. This matters for [DESIGN.md rule 5](DESIGN.md#5-the-seventeen-rules-and-the-failure-each-one-traces-to): trend growth sizes the watch interval, not the saturation stop rule.
 
 ### 4.6 Deprecated fields still appear in old guides
 
@@ -171,7 +208,8 @@ field tripling annually, "<5% new results this round" is stasis, not saturation.
 | `concepts`, `x_concepts` | `topics` |
 | `grants` | `funders` / `awards` |
 | `has_ngrams` | `has_fulltext` |
-| `mailto=` | `api_key=` |
+| `mailto=` | optional courtesy metadata; not authentication |
+| `api_key=` | account/rate-limit authentication when required |
 
 `openalex_describe_fields` returns the currently valid field names for an entity type — call
 it before constructing a filter rather than trusting a remembered schema.
@@ -186,7 +224,7 @@ Not interchangeable. Each backend has one job it is genuinely best at:
 |---|---|
 | AI/ML keyword discovery, preprints | `arxiv.search_papers` |
 | Read a named section without downloading a paper | `arxiv.get_paper_latex_section` |
-| **BibTeX** | `arxiv.export_citations` — **the only** permitted source |
+| **BibTeX** | Prefer `arxiv.export_citations`; add strict per-entry `rs-provenance` (key/id/tool/date). This is not cryptographic proof; `ars-verify` resolves identifiers externally. |
 | Standing subscription | `arxiv.watch_topic` / `check_alerts` |
 | Citation graph at scale, cursor-paginated | `openalex.get_citation_graph` |
 | **Coverage matrix / field growth baseline** | `openalex.analyze_trends` |
@@ -194,7 +232,9 @@ Not interchangeable. Each backend has one job it is genuinely best at:
 | Non-arXiv venues, workshop sites, blogs | `tavily.search` |
 | HF Papers feed, model/dataset cards | `tavily.search` with `site:huggingface.co`, or fetch the page directly |
 
-**Never parse a PDF when LaTeX or HTML exists.** For arXiv-dominated work this removes the
-need for a document-parsing layer entirely. If you do hit a proceedings-only PDF: document parser 01 is
-strong on tables (table-extraction component TEDS >91%) and weak on maths (<70% BLEU on complex equations,
-against document parser 02's >90%) — pick by what the paper's content actually is.
+**Prefer LaTeX or HTML when it is complete, but do not assume it exists.** For arXiv papers,
+try `get_paper_latex_section` first. If source is missing, use the arXiv MCP's optional
+`[pdf]` extra (`download_paper`/`read_paper`, HTML first), then a configured local
+`markitdown-mcp` or another pinned parser for proceedings-only, image-only or malformed PDFs.
+Record the parser/version and what was visually checked. No universal document parser 01-versus-document parser 02
+quality claim is established here.

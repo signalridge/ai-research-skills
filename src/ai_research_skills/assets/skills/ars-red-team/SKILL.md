@@ -35,9 +35,10 @@ to extend the corpus. Anything it finds that should be in the corpus goes back t
 Name **three plausible alternative phrasings** for the core concept, without looking at the
 protocol. Then check whether they were searched.
 
-Terminology in CS/ML drifts faster than it standardizes: *content moderation* = *safety
-filtering* = *NSFW detection*; *chain-of-thought* = *scratchpad* = *intermediate
-reasoning*; *retrieval-augmented* = *memory-augmented* = *tool-augmented*.
+Terminology in CS/ML drifts faster than it standardizes. For example, a long-context
+question may be described as *extended-context*, *large-window*, or *long-sequence* work;
+an iterative retriever may appear as *multi-stage*, *repeated-search*, or *retrieval-loop*
+work. Generate alternatives from the topic's own vocabulary, not from this example.
 
 Run any unsearched phrasing now. **New on-topic results are a critical finding** — the
 corpus has a terminology-shaped hole and every gap downstream is suspect.
@@ -191,7 +192,8 @@ more rigorous" is not a finding.
 
 - **Upstream:** reads all of `.research/survey/<slug>/` — checkpoint A attacks what
   `ars-survey` Phase 4 produced.
-- **Writes:** `challenge-<date>.md`.
+- **Writes:** `challenge-<date>.md` only. Refutation results, even when on-topic, are never
+  appended to `corpus.jsonl`, `protocol.yml`, or `gaps.yml`; hand them back to `ars-survey`.
 - **Downstream:** gates every exit — checkpoint B must pass before `ars-gap-gate`,
   `ars-related-work` or `ars-decision-brief` output is delivered.
 - `ars-verify` covers citation and number integrity, which this skill does not duplicate.

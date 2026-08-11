@@ -33,12 +33,13 @@ ignore = [
     "BLE001",  # blind except — deliberate, see above
     "S110",    # try/except/pass — deliberate, see above
     "DTZ011",  # date.today() — survey age is a local-calendar question, not an instant
+    "PLR0911", "E501",  # flat fail-open guards and long user-facing guidance strings
 ]
 
 # Tests shell out to the hooks and read files for assertions; the strict forms add noise
 # without adding safety here.
 "tests/*.py" = [
-    "S101", "S108", "S404", "BLE001", "DTZ011", "SIM115", "PLW1510",
+    "S101", "S108", "S404", "BLE001", "DTZ011", "SIM115", "PLW1510", "E501",
     "PLW0603",  # module-level pass/fail counters are the point of a tiny harness
     "PLR0911",  # outcome() is a flat dispatch; splitting it would obscure it
     "PLC0415",  # local imports keep each test block self-contained
@@ -46,5 +47,5 @@ ignore = [
 
 "src/ai_research_skills/assets/scripts/*.py" = [
     "BLE001",  # a malformed state file should be reported as a finding, not a traceback
-    "DTZ011",
+    "DTZ011", "PLR0911", "E501",  # small stdlib profiles prefer explicit branches/diagnostics
 ]

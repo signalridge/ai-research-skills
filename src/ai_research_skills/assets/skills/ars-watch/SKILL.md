@@ -26,6 +26,9 @@ that matters more than the rest: *has anything closed one of my gaps?*
 
 `protocol.yml` at `phase: 5` with a `last_searched_at`, and `gaps.yml` whose entries carry
 `closes_if`. A gap without a falsifier cannot be watched — send it back to `ars-survey` Phase 4.
+Watch is the only post-survey skill permitted to update `corpus.jsonl`, `protocol.yml`, or
+`gaps.yml`, and it may do so only by replaying this frozen protocol; red-team discoveries go
+back to survey rather than being appended here.
 
 ---
 
@@ -70,8 +73,9 @@ Plus a bounded re-run of the protocol's own queries with a date floor:
 arxiv → search_papers(query: <verbatim from protocol>, date_from: <last_searched_at>)
 
 openalex → openalex_get_citation_graph(
-  seed_id: <top-3 seeds>, direction: "cites",
+  seed_id: <one seed>, direction: "cites",
   filters: {"from_publication_date": "<last_searched_at>"}, per_page: 100)
+# Repeat one bounded call for each of the top three seeds; seed_id is singular.
 ```
 
 Forward chains from the seeds are the highest-yield part. New work that engages your
@@ -93,8 +97,8 @@ Three outcomes, and be strict about the middle one:
 
 | Outcome | Action |
 |---|---|
-| **Closed** | The falsifier is satisfied. Flag loudly. Set the gap's `closes_if_met` with the closing paper's key and date. |
-| **Threatened** | Close but not decisive — a different benchmark, one arm only, a workshop abstract. Report it and say exactly which clause is unmet. |
+| **Closed** | The falsifier is satisfied. Flag loudly. Set typed `closes_if_met: {key, date, rationale}` with the closing paper's key and date. |
+| **Threatened** | Close but not decisive — a different benchmark, one arm only, a workshop abstract. Record `threats: [{key, date, unmet_clause}]` and say exactly which clause is unmet. |
 | **Open** | No match. Update `evidence_of_absence.last_checked` to today. |
 
 That last row is quiet but load-bearing: **a check with no findings still refreshes the
@@ -166,7 +170,9 @@ Then offer: re-run `ars-gap-gate` to see whether a neighbouring candidate surviv
 
 - **Upstream:** re-runs `protocol.yml` verbatim — the contract `ars-survey` froze at
   `phase: 5`.
-- **Writes:** appends to `corpus.jsonl`, writes `digest.md`, updates `last_searched_at`.
+- **Writes:** only at Phase 5: replays the frozen protocol, appends scored candidates to
+  `corpus.jsonl`, updates `protocol.yml`/gap freshness and typed closure or threat state,
+  and writes a digest. It does not freely discover a new corpus outside that replay.
 - **Downstream:** keeps `ars-gap-gate` G1 scorable and the staleness hook silent by
   re-testing every gap's `closes_if` against each new paper.
 - `/ars-watch` is the command form.

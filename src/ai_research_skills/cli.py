@@ -1,7 +1,7 @@
 """ai-research-skills command line interface.
 
-    ai-research-skills install [path]      copy the suite into <path>/.claude/
-    ai-research-skills uninstall [path]    remove it, keeping foreign hooks
+    ai-research-skills install [path]      configure the suite for selected host(s)
+    ai-research-skills uninstall [path]    remove manifest-owned files/handlers only
     ai-research-skills doctor [path]       check an installation item by item
 
 The repo-root install.py shim lands here too: dispatched on argv[0], it keeps
@@ -20,13 +20,13 @@ from ai_research_skills import __version__, hosts, installer
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(
         prog="ai-research-skills",
-        description="Install the ai-research-skills suite into a project's .claude/.",
+        description="Safely configure ai-research-skills in a project host.",
     )
     ap.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     sub = ap.add_subparsers(dest="command", required=True)
     for name, summary in (
-        ("install", "copy the suite into <path>/.claude/ and merge its hooks"),
-        ("uninstall", "remove the suite from <path>, keeping foreign hooks"),
+        ("install", "configure the suite for <path> with manifest ownership"),
+        ("uninstall", "remove manifest-owned files and handlers from <path>"),
         ("doctor", "check an installation: files, hook entries, backend env"),
     ):
         p = sub.add_parser(name, help=summary)

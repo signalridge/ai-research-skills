@@ -1,4 +1,5 @@
-# ILLUSTRATIVE EXAMPLE.
+# Candidate gaps in the synthetic example. A typed closes_if is prospective; a
+# closes_if_met object would be added by ars-watch only after a corpus paper closes it.
 gaps:
   - id: G1
     statement: "No work evaluates agentic retrieval against long-context baselines with retrieval recall held constant; existing comparisons control token budget instead."
@@ -8,36 +9,32 @@ gaps:
         - 'abs:"retrieval recall" AND abs:"long context" AND abs:"multi-hop"'
         - 'ti:"controlled comparison" AND abs:"retrieval augmented"'
         - "matched retrieval budget long context agent question answering"
-      venues_swept: ["ICLR@2025-2026", "NeurIPS@2025", "ACL@2025-2026", "COLM@2025"]
-      citation_chains: ["W2626778328:cites:1", "W4000000001:cited_by:1"]
+      venues_swept: ["ICLR@2025-2026", "NeurIPS@2025", "ACL@2025-2026"]
+      citation_chains: ["W2626778328:cites:1"]
       nearest_prior_work:
         - key: alpha2025iterative
           why_not_it: "controls token budget, not retrieval recall — the two arms see different amounts of relevant evidence"
           differing_axis: problem-setting
         - key: beta2025longctx
-          why_not_it: "same control, opposite conclusion; the disagreement is what motivates the gap"
+          why_not_it: "same control, opposite conclusion; the disagreement motivates the gap"
           differing_axis: problem-setting
       last_checked: 2026-08-03
-    # medium, not high: epsilon2026workshop may already address this and could not be resolved.
     confidence: medium
-    closes_if: "Any paper reporting multi-hop QA with retrieval recall matched across an agentic-retrieval arm and a long-context arm."
-
-  # Promoted from an `avoided` cell. Note the contribution evidence is the future-work
-  # mentions themselves — each is a group that would cite the result.
+    closes_if: "Any paper reports multi-hop QA with retrieval recall matched across an agentic-retrieval arm and a long-context arm."
   - id: G2
-    statement: "No work evaluates long-context models at 3+ hops; every evaluation stops at 2-hop despite 3+-hop being repeatedly named as the open case."
+    statement: "No work evaluates long-context models at 3+ hops; the synthetic field repeatedly names this as an open case."
     type: missing-benchmark
     evidence_of_absence:
       queries_run:
-        - 'abs:"long context" AND abs:"three-hop" OR abs:"multi-hop" AND abs:"depth"'
-        - 'abs:"3-hop" AND abs:"long context" ANDNOT abs:"retrieval"'
+        - 'abs:"long context" AND abs:"three-hop"'
+        - 'abs:"3-hop" AND abs:"long context"'
         - "long context models deeper multi-hop evaluation beyond two hops"
       venues_swept: ["ICLR@2025-2026", "NeurIPS@2025", "ACL@2025-2026"]
       citation_chains: ["W2626778328:cites:1"]
       nearest_prior_work:
         - key: gamma2026threehop
-          why_not_it: "extends to 3+ hops but only for iterative retrieval; no long-context arm exists at that depth"
+          why_not_it: "extends to 3+ hops but only for iterative retrieval; no long-context arm exists"
           differing_axis: object-acted-on
       last_checked: 2026-08-03
     confidence: medium
-    closes_if: "Any paper reporting long-context model accuracy at 3 or more hops on a multi-hop QA benchmark."
+    closes_if: "Any paper reports long-context model accuracy at 3 or more hops on a multi-hop QA benchmark."

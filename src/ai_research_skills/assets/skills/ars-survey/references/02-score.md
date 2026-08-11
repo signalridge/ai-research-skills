@@ -15,11 +15,13 @@ A binary include/exclude call is irreversible and untunable. Change your mind ab
 boundary and you re-read everything.
 
 Scoring separates *how relevant is this* (expensive, done once) from *where is the line*
-(cheap, redone freely). retrieval-summary benchmark does this and calls it RCS — re-ranking and contextual
-summarization — and it is the highest-leverage idea in the agentic-RAG literature.
+(cheap, redone freely). retrieval-summary benchmark calls its retrieval/reranking/contextual-summarisation
+pattern RCS. The transferable idea is question-conditioned evidence ranking, not the full
+agentic-RAG system.
 
-The second benefit is compression: a contextual summary is 200–400 tokens where the source
-chunk is ~2,000, with no measured loss in downstream answer quality.
+A contextual summary is a navigation aid, not a measured lossless replacement for the
+source. Keep it bounded for ARS, but re-read the paper for any load-bearing claim, number,
+figure or limitation.
 
 ## The scoring pass
 
@@ -96,10 +98,12 @@ Use it when the abstract is uninformative, the full text is inaccessible, or the
 might be relevant under an interpretation you cannot resolve alone. **Do not force a
 binary.**
 
-literature benchmark measures this directly and the result is stark: Claude 3.5 Sonnet answered only
-**12%** of literature QA task v2 questions but was correct on **47%** of those — an accuracy of 0.06 that
-reads as "useless" beside a precision of 0.47 that reads as "cautious and often right."
-Collapse those into one number and you have destroyed the information that matters.
+Cited literature benchmark/literature QA task v2 results illustrate this distinction under a particular model/tool
+condition: one Claude 3.5 Sonnet row reportedly answered only **12%** of questions but was
+correct on **47%** of those it answered (rounded accuracy **0.06**). The dedicated result
+source was not locally re-verified in this audit, so treat it as qualified benchmark context,
+not a universal model characteristic. Collapse coverage and precision into one number and
+you lose the information that matters.
 
 So report three numbers, not one:
 

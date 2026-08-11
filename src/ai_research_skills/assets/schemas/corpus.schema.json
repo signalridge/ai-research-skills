@@ -2,14 +2,12 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/signalridge/ai-research-skills/schemas/corpus.schema.json",
   "title": "Corpus record",
-  "description": "One record per candidate paper. corpus.jsonl holds one of these per line.",
+  "description": "One record per candidate paper. Phase-aware extraction requirements are enforced by rs_validate so Phase 1 candidates may be incomplete.",
   "type": "object",
   "required": [
     "key",
     "title",
     "found_via",
-    "relevance",
-    "screen",
     "accessed"
   ],
   "additionalProperties": false,
@@ -26,7 +24,7 @@
     "openalex_id": {
       "type": "string",
       "pattern": "^W[0-9]+$",
-      "description": "OpenAlex work ID. MUST come from openalex_resolve_name \u2014 never guessed. Once set, every further OpenAlex touch of this record is a free singleton lookup."
+      "description": "OpenAlex work ID. MUST come from openalex_resolve_name \u2014 never guessed. Once set, reuse the ID for later lookups and record any returned cost/budget metadata."
     },
     "title": {
       "type": "string",
@@ -180,44 +178,5 @@
     "notes_path": {
       "type": "string"
     }
-  },
-  "allOf": [
-    {
-      "if": {
-        "properties": {
-          "screen": {
-            "const": "include"
-          }
-        },
-        "required": [
-          "screen"
-        ]
-      },
-      "then": {
-        "required": [
-          "claim",
-          "evidence_read",
-          "contextual_summary"
-        ],
-        "description": "An include with no claim is an un-read paper wearing a decision."
-      }
-    },
-    {
-      "if": {
-        "properties": {
-          "screen": {
-            "const": "exclude"
-          }
-        },
-        "required": [
-          "screen"
-        ]
-      },
-      "then": {
-        "required": [
-          "exclude_reason"
-        ]
-      }
-    }
-  ]
+  }
 }

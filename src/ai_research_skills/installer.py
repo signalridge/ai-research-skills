@@ -1,26 +1,39 @@
-"""Install ai-research-skills into a project's .claude/ directory.
+"""Safe, stdlib-only installer for ai-research-skills.
 
-Copies commands, skills and hooks into <root>/.claude/, the validator and its
-schemas into <root>/.claude/ai-research-skills/, and merges the four guardrail
-hooks into <root>/.claude/settings.json. Idempotent: re-running replaces this
-suite's files and hook entries without touching anything else.
-
-Standard library only — the installer runs in whatever python3 the user has.
-
-The suite's assets are package data under ai_research_skills/assets/, so a checkout
-and an installed copy read the same tree from the same place.
+The installer owns individual suite files and individual hook handlers, never an entire
+host configuration.  Every install/uninstall performs a complete preflight first, then
+uses same-directory tempfile+fsync+replace writes inside a small rollback transaction.
 """
 
 from __future__ import annotations
 
 import argparse
+import base64
+import contextlib
+import copy
+import errno
+import hashlib
 import json
 import os
-import shutil
+import stat
+import subprocess
 import sys
+import tempfile
+from collections import Counter
+from collections.abc import Generator, Iterable
 from typing import Any
 
-from ai_research_skills import hosts
+try:  # Unix file locks
+    import fcntl
+except ImportError:  # pragma: no cover - exercised on Windows
+    fcntl = None  # type: ignore[assignment]
+
+try:  # Windows file locks
+    import msvcrt
+except ImportError:  # pragma: no cover - exercised on Unix
+    msvcrt = None  # type: ignore[assignment]
+
+from ai_research_skills import __version__, hook_adapters, hosts
 
 SKILLS = (
     "ars-survey",
@@ -31,13 +44,6 @@ SKILLS = (
     "ars-red-team",
     "ars-verify",
 )
-HOOK_SCRIPTS = (
-    "_payload.py",
-    "bib_provenance_guard.py",
-    "absence_claim_guard.py",
-    "survey_staleness.py",
-    "stop_survey_peer.py",
-)
 COMMANDS = (
     "ars-audit.md",
     "ars-brief.md",
@@ -47,6 +53,13 @@ COMMANDS = (
     "ars-survey.md",
     "ars-watch.md",
 )
+HOOK_SCRIPTS = (
+    "_payload.py",
+    "absence_claim_guard.py",
+    "bib_provenance_guard.py",
+    "stop_survey_peer.py",
+    "survey_staleness.py",
+)
 SCHEMAS = (
     "corpus.schema.json",
     "coverage.schema.json",
@@ -54,35 +67,16 @@ SCHEMAS = (
     "protocol.schema.json",
 )
 
-# The `rs-` names this suite shipped before v0.5. Nothing here is ever written — these
-# exist only so install and uninstall can clear them out of a project that still carries
-# them. Leaving them behind is not cosmetic: two skill directories whose descriptions
-# match the same requests both stay live, so `/rs-survey` keeps resolving to a stale copy
-# and the agent picks between them at random.
-#
-# `rs_validate.py` and the `rs-provenance` header are deliberately NOT renamed. The header
-# is a file-format marker already written into users' `refs.bib` files and matched by
-# bib_provenance_guard; renaming it would make every existing bibliography fail the guard
-# that is supposed to protect it.
+# Names from the pre-v0.5 distribution are retained as migration diagnostics only.  An
+# unknown or edited legacy asset is user data; silently deleting it is not a migration.
 LEGACY_SKILLS = tuple(name.removeprefix("a") for name in SKILLS)
 LEGACY_COMMANDS = tuple(name.removeprefix("a") for name in COMMANDS)
 
-# Suffixes each write-time guard actually inspects. Kept here so the `if` conditions
-# below cannot drift from what the guard checks internally — a condition narrower than
-# the guard's own filter silently disables it, and nothing reports that.
 BIB_SUFFIXES = (".bib",)
 PROSE_SUFFIXES = (".md", ".tex", ".markdown", ".mdx")
 
-# event, matcher, script, timeout, if-conditions
-#
-# The `if` conditions are a pre-filter Claude Code evaluates BEFORE spawning the
-# process, so a write to an unrelated file costs nothing instead of ~22ms per guard.
-# Verified empirically that the glob matches at depth: a .bib three directories down
-# (.research/survey/<slug>/refs.bib — where they actually live) is still caught.
-#
-# The guards re-check the suffix themselves, so a condition that is too broad only
-# costs a process that exits immediately. Too narrow is the dangerous direction, which
-# is why the patterns are generated from the tuples above rather than typed out.
+# Compatibility description of the Claude filters.  The central adapter uses these
+# only for Claude; Cursor receives direct native definitions without an `if` field.
 HOOK_SPEC = (
     (
         "PreToolUse",
@@ -106,397 +100,1752 @@ HOOK_SPEC = (
     ("Stop", None, "stop_survey_peer.py", 15, ()),
 )
 
-
 ASSETS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
 SRC_SKILLS = os.path.join(ASSETS, "skills")
 SRC_COMMANDS = os.path.join(ASSETS, "commands")
 SRC_HOOKS = os.path.join(ASSETS, "hooks")
 SRC_SCRIPTS = os.path.join(ASSETS, "scripts")
 SRC_SCHEMAS = os.path.join(ASSETS, "schemas")
+VALIDATOR_RUNTIME_ASSETS = ("rs_validate.py", "_yaml_subset.py", "_schema_subset.py")
+MANIFEST_REL = ".ai-research-skills/manifest.json"
+JOURNAL_REL = ".ai-research-skills/transaction.json"
+LEGACY_FINGERPRINT_REL = os.path.join("legacy", "v0.5.0.json")
+MANIFEST_FORMAT = 1
+JOURNAL_FORMAT = 1
 
-
-def hook_command(script: str, host: hosts.Host) -> str:
-    """Claude Code expands $CLAUDE_PROJECT_DIR; other hosts do not define it, so they
-    get a path relative to the project root the agent already runs in."""
-    if host.id == "claude":
-        return f'python3 "$CLAUDE_PROJECT_DIR/.claude/hooks/{script}"'
-    return f'python3 "{host.ownership_root}/hooks/{script}"'
-
-
-def is_ours(command: str) -> bool:
-    """A hook command belongs to this suite if it runs one of our scripts."""
-    return any(script in command for script in HOOK_SCRIPTS)
-
-
-def copy_tree(src: str, dst: str) -> None:
-    shutil.copytree(src, dst, dirs_exist_ok=True)
-
-
-# The skills are authored against Claude Code's layout, which is the richest surface.
-# Every other host puts the same files under its own root and has no $CLAUDE_PROJECT_DIR,
-# so a verbatim copy tells the agent to read a path that does not exist. Rewrite on the
-# way in rather than authoring one variant per host.
 CLAUDE_ROOT = ".claude"
 CLAUDE_PROJECT_DIR = "$CLAUDE_PROJECT_DIR/"
 
 
-def localise(text: str, host: hosts.Host) -> str:
-    """Rewrite Claude Code's layout to this host's, in every form it appears.
+def _installed_hook_scripts(host: hosts.Host) -> tuple[str, ...]:
+    if not host.hooks:
+        return ()
+    adapter = hook_adapters.for_host(host)
+    names = {"_payload.py"}
+    names.update(script for _event, _matcher, script, _timeout in adapter.specs())
+    return tuple(name for name in HOOK_SCRIPTS if name in names)
 
-    Both forms are load-bearing and neither announces its own failure. The qualified
-    `$CLAUDE_PROJECT_DIR/.claude/…` is how a skill invokes the validator; the bare
-    `.claude/…` is how prose points at an installed file. Rewriting only the first left
-    the schemas paragraph telling a Codex agent to look under `.claude/`, which is a
-    directory that host does not have.
+
+class InstallerError(RuntimeError):
+    pass
+
+
+def _project_path_identity(root: str) -> str:
+    """Return the lock identity that remains stable before and after creation."""
+    absolute = os.path.abspath(root)
+    canonical = os.path.normcase(os.path.realpath(absolute)).casefold()
+    return f"path:{canonical}"
+
+
+def _project_root_identity(root: str) -> str:
+    """Return an inode identity for an existing project root.
+
+    Existing roots can use the filesystem's device/inode pair, which also handles
+    symlink and case aliases without assuming the host's spelling rules.  Filesystems
+    that do not provide a usable inode fall back to the normalized real path.  A root
+    that does not exist yet uses the same canonical path identity as the stable path
+    lock, including realpath resolution through existing ancestors.
     """
+    absolute = os.path.abspath(root)
+    try:
+        root_stat = os.stat(absolute)
+    except OSError:
+        return _project_path_identity(absolute)
+
+    device = getattr(root_stat, "st_dev", None)
+    inode = getattr(root_stat, "st_ino", None)
+    if device is not None and inode not in (None, 0):
+        return f"stat:{device}:{inode}"
+    return _project_path_identity(absolute)
+
+
+def _lock_directory_path() -> str:
+    """Return the stable per-user directory used for inter-process locks."""
+    if os.name == "nt":  # pragma: no cover - Windows path
+        # Windows' temp directory is normally already private to the user.  Keep
+        # this fallback there so the existing msvcrt byte-range lock remains usable.
+        return os.path.join(tempfile.gettempdir(), "ai-research-skills")
+    return os.path.join(os.path.sep, "tmp", f"ai-research-skills-{os.getuid()}")
+
+
+def _ensure_lock_directory() -> None:
+    """Create and validate the private POSIX lock directory."""
+    directory = _lock_directory_path()
+    if os.name == "nt":  # pragma: no cover - Windows path
+        os.makedirs(directory, mode=0o700, exist_ok=True)
+        return
+
+    uid = os.getuid()
+    try:
+        info = os.lstat(directory)
+    except FileNotFoundError:
+        with contextlib.suppress(FileExistsError):
+            os.mkdir(directory, 0o700)
+        info = os.lstat(directory)
+    if stat.S_ISLNK(info.st_mode):
+        raise InstallerError(f"lock directory is a symlink: {directory}")
+    if not stat.S_ISDIR(info.st_mode):
+        raise InstallerError(f"lock path is not a directory: {directory}")
+    if info.st_uid != uid:
+        raise InstallerError(
+            f"lock directory is not owned by the current user: {directory}"
+        )
+    if stat.S_IMODE(info.st_mode) != 0o700:
+        raise InstallerError(f"lock directory has unsafe permissions: {directory}")
+
+
+class _ProjectLock:
+    """Blocking OS lock keyed by a normalized project identity.
+
+    The lock file lives in a stable per-user directory rather than in the project.
+    That keeps a conflict/no-op preflight byte-for-byte non-mutating, while the stable
+    name still serialises all processes operating on one project.  The file may remain
+    after a crash; the OS lock itself cannot.
+    """
+
+    def __init__(self, root: str, *, identity: str | None = None) -> None:
+        self.identity = identity if identity is not None else _project_root_identity(root)
+        digest = hashlib.sha256(self.identity.encode()).hexdigest()
+        self.path = os.path.join(
+            _lock_directory_path(), f"ai-research-skills-{digest}.lock"
+        )
+        self.fd: int | None = None
+
+    def __enter__(self) -> _ProjectLock:
+        _ensure_lock_directory()
+        flags = os.O_RDWR | os.O_CREAT
+        if os.name != "nt":
+            flags |= getattr(os, "O_NOFOLLOW", 0)
+        try:
+            self.fd = os.open(self.path, flags, 0o600)
+            if os.name != "nt":
+                info = os.fstat(self.fd)
+                if not stat.S_ISREG(info.st_mode):
+                    raise InstallerError(f"lock path is not a regular file: {self.path}")
+                if info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) & 0o077:
+                    raise InstallerError(
+                        f"lock file has unsafe ownership or permissions: {self.path}"
+                    )
+                if stat.S_IMODE(info.st_mode) != 0o600:
+                    os.fchmod(self.fd, 0o600)
+            if fcntl is not None:
+                fcntl.flock(self.fd, fcntl.LOCK_EX)
+            elif msvcrt is not None:  # pragma: no cover - Windows path
+                if os.path.getsize(self.path) == 0:
+                    os.write(self.fd, b"0")
+                os.lseek(self.fd, 0, os.SEEK_SET)
+                msvcrt.locking(self.fd, msvcrt.LK_LOCK, 1)
+            else:  # pragma: no cover - every supported platform has one
+                raise InstallerError("no stdlib OS file-lock implementation is available")
+        except Exception:
+            if self.fd is not None:
+                with contextlib.suppress(OSError):
+                    os.close(self.fd)
+                self.fd = None
+            raise
+        return self
+
+    def __exit__(self, _exc_type: object, _exc: object, _traceback: object) -> None:
+        if self.fd is None:
+            return
+        try:
+            if fcntl is not None:
+                fcntl.flock(self.fd, fcntl.LOCK_UN)
+            elif msvcrt is not None:  # pragma: no cover - Windows path
+                os.lseek(self.fd, 0, os.SEEK_SET)
+                msvcrt.locking(self.fd, msvcrt.LK_UNLCK, 1)
+        finally:
+            os.close(self.fd)
+            self.fd = None
+
+
+def _project_path_lock(root: str) -> _ProjectLock:
+    """Return the lock shared by every operation for this root spelling."""
+    absolute = os.path.abspath(root)
+    return _ProjectLock(absolute, identity=_project_path_identity(absolute))
+
+
+def _project_lock(root: str) -> _ProjectLock:
+    """Return the lock for the root inode currently named by ``root``."""
+    return _ProjectLock(os.path.abspath(root))
+
+
+def hook_command(script: str, host: hosts.Host, root: str | None = None) -> str:
+    """Compatibility view of the centralized host adapter command builder."""
+    return hook_adapters.command_for(host, script, root)
+
+
+def is_ours(command: str, host: hosts.Host | None = None, root: str | None = None) -> bool:
+    """Return true only for an exact generated or published migration command."""
+    return hook_adapters.is_ours(command, host, root)
+
+
+def _sha256(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def _canonical(value: Any) -> bytes:
+    return json.dumps(
+        value, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    ).encode()
+
+
+def _seal_manifest(payload: dict[str, Any]) -> dict[str, Any]:
+    result = copy.deepcopy(payload)
+    result["manifest_sha256"] = _sha256(_canonical(result))
+    return result
+
+
+def _manifest_valid(data: object) -> bool:
+    if not isinstance(data, dict):
+        return False
+    supplied = data.get("manifest_sha256")
+    if not isinstance(supplied, str):
+        return False
+    unsigned = dict(data)
+    unsigned.pop("manifest_sha256", None)
+    return supplied == _sha256(_canonical(unsigned))
+
+
+def _relative(root: str, path: str) -> str:
+    return os.path.relpath(path, root).replace(os.sep, "/")
+
+
+def _safe_path(root: str, relative: str, *, allow_root: bool = False) -> str:
+    """Resolve a target and reject symlink components and traversal."""
+    root = os.path.abspath(root)
+    if not os.path.isdir(root):
+        raise InstallerError(f"target root is not an existing directory: {root}")
+    root_stat = os.lstat(root)
+    if stat.S_ISLNK(root_stat.st_mode):
+        raise InstallerError(f"target root is a symlink: {root}")
+    if os.path.isabs(relative):
+        raise InstallerError(f"absolute path is not allowed: {relative}")
+    parts = [
+        part for part in relative.replace("\\", "/").split("/") if part not in ("", ".")
+    ]
+    if any(part == ".." for part in parts):
+        raise InstallerError(f"path escapes target root: {relative}")
+    current = root
+    for part in parts:
+        current = os.path.join(current, part)
+        if os.path.lexists(current) and stat.S_ISLNK(os.lstat(current).st_mode):
+            raise InstallerError(
+                f"symlink target/ancestor refused: {_relative(root, current)}"
+            )
+    if not parts and not allow_root:
+        raise InstallerError("empty managed path")
+    candidate = os.path.abspath(os.path.join(root, *parts))
+    if os.path.commonpath((root, candidate)) != root:
+        raise InstallerError(f"path escapes target root: {relative}")
+    return candidate
+
+
+def _read_bytes(path: str) -> bytes | None:
+    try:
+        with open(path, "rb") as fh:
+            return fh.read()
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        raise InstallerError(f"cannot read {path}: {exc}") from exc
+
+
+def _atomic_write(path: str, data: bytes, mode: int = 0o644) -> None:
+    """Write atomically, fsyncing the file and best-effort destination directory."""
+    directory = os.path.dirname(path) or "."
+    os.makedirs(directory, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(prefix=".ars-", dir=directory)
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(data)
+            fh.flush()
+            # File fsync is part of the replace guarantee and remains required on
+            # every platform.  Directory fsync is a separate capability below.
+            os.fsync(fh.fileno())
+            os.chmod(temporary, stat.S_IMODE(mode))
+        os.replace(temporary, path)
+        _fsync_directory(directory)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+def _atomic_json(path: str, data: dict[str, Any], mode: int = 0o644) -> None:
+    _atomic_write(
+        path, (json.dumps(data, indent=2, ensure_ascii=False) + "\n").encode(), mode
+    )
+
+
+def _load_json(path: str) -> dict[str, Any]:
+    try:
+        with open(path, encoding="utf-8") as fh:
+            value = json.load(fh)
+    except (OSError, json.JSONDecodeError) as exc:
+        raise InstallerError(
+            f"{path} is not valid JSON; refusing to mutate it: {exc}"
+        ) from exc
+    if not isinstance(value, dict):
+        raise InstallerError(f"{path} is not a JSON object; refusing to mutate it")
+    return value
+
+
+def load_settings(path: str) -> dict[str, Any]:
+    return _load_json(path) if os.path.exists(path) else {}
+
+
+def _source_files(directory: str) -> list[str]:
+    result: list[str] = []
+    for dirpath, dirnames, filenames in os.walk(directory):
+        dirnames[:] = [name for name in dirnames if name != "__pycache__"]
+        for filename in filenames:
+            if filename.endswith(".pyc"):
+                continue
+            result.append(os.path.join(dirpath, filename))
+    return sorted(result)
+
+
+def localise(text: str, host: hosts.Host) -> str:
     if host.id == "claude":
         return text
     return (
         text.replace(f"{CLAUDE_PROJECT_DIR}{CLAUDE_ROOT}/", f"{host.ownership_root}/")
         .replace(f"{CLAUDE_ROOT}/", f"{host.ownership_root}/")
-        # Anything still qualified by the variable resolves to the project root, which is
-        # the directory a non-Claude agent already runs in.
         .replace(CLAUDE_PROJECT_DIR, "")
     )
 
 
-def copy_skill(src: str, dst: str, host: hosts.Host) -> None:
-    """copy_tree, but markdown gets host-local paths substituted in."""
-    for dirpath, _dirnames, filenames in os.walk(src):
-        rel = os.path.relpath(dirpath, src)
-        target_dir = os.path.join(dst, rel) if rel != "." else dst
-        os.makedirs(target_dir, exist_ok=True)
-        for name in filenames:
-            source = os.path.join(dirpath, name)
-            target = os.path.join(target_dir, name)
-            if name.endswith(".md"):
-                with open(source, encoding="utf-8") as fh:
-                    body = fh.read()
-                with open(target, "w", encoding="utf-8") as fh:
-                    fh.write(localise(body, host))
-            else:
-                shutil.copy2(source, target)
+def _desired_files(root: str, host: hosts.Host) -> dict[str, bytes]:
+    """Build all ordinary files before the transaction starts."""
+    desired: dict[str, bytes] = {}
 
-
-def remove_legacy(root: str, host: hosts.Host) -> list[str]:
-    """Clear the pre-v0.5 `rs-` names out of a host's tree.
-
-    Run on install as well as uninstall. An upgrade that only writes the new names leaves
-    both generations installed and both matching the same requests, which is a worse state
-    than either alone. Returns what it removed so install can report it.
-    """
-    swept = []
-    for skill in LEGACY_SKILLS:
-        path = os.path.join(root, host.skills_dir, skill)
-        if os.path.isdir(path):
-            shutil.rmtree(path, ignore_errors=True)
-            swept.append(f"{host.skills_dir}/{skill}/")
-    if host.commands_dir:
-        for name in LEGACY_COMMANDS:
-            path = os.path.join(root, host.commands_dir, name)
-            if os.path.exists(path):
-                os.remove(path)
-                swept.append(f"{host.commands_dir}/{name}")
-    return swept
-
-
-def install_files(root: str, host: hosts.Host) -> list[str]:
-    """Copy the suite into one host's tree. Skills and support files everywhere;
-    commands and hooks only where the host has a surface for them."""
-    done = []
-
-    for skill in SKILLS:
-        copy_skill(
-            os.path.join(SRC_SKILLS, skill),
-            os.path.join(root, host.skills_dir, skill),
-            host,
-        )
-    done.append(f"{host.skills_dir}/")
-
-    if host.commands_dir:
-        dst = os.path.join(root, host.commands_dir)
-        os.makedirs(dst, exist_ok=True)
-        for name in COMMANDS:
-            source = os.path.join(SRC_COMMANDS, name)
-            target = os.path.join(dst, name)
+    def add_file(relative: str, source: str, localise_markdown: bool = False) -> None:
+        path = _safe_path(root, relative)
+        if localise_markdown and source.endswith(".md"):
             with open(source, encoding="utf-8") as fh:
-                body = fh.read()
-            with open(target, "w", encoding="utf-8") as fh:
-                fh.write(localise(body, host))
-        done.append(f"{host.commands_dir}/")
-
-    if host.hooks:
-        dst = os.path.join(root, host.ownership_root, "hooks")
-        os.makedirs(dst, exist_ok=True)
-        for name in HOOK_SCRIPTS:
-            shutil.copy2(os.path.join(SRC_HOOKS, name), os.path.join(dst, name))
-        done.append(f"{host.ownership_root}/hooks/")
-
-    # The validator and its schemas are host-neutral, but each host gets its own copy
-    # so uninstalling one never breaks another.
-    support = os.path.join(root, host.ownership_root, "ai-research-skills")
-    os.makedirs(os.path.join(support, "scripts"), exist_ok=True)
-    shutil.copy2(
-        os.path.join(SRC_SCRIPTS, "rs_validate.py"),
-        os.path.join(support, "scripts", "rs_validate.py"),
-    )
-    copy_tree(SRC_SCHEMAS, os.path.join(support, "schemas"))
-    done.append(f"{host.ownership_root}/ai-research-skills/")
-
-    return done
-
-
-def remove_files(root: str, host: hosts.Host) -> None:
-    """Remove only what install_files wrote, in this version or any earlier one.
-    Anything else under the host's tree belongs to the user."""
-    remove_legacy(root, host)
+                data = localise(fh.read(), host).encode()
+        else:
+            with open(source, "rb") as fh:
+                data = fh.read()
+        desired[path] = data
 
     for skill in SKILLS:
-        shutil.rmtree(os.path.join(root, host.skills_dir, skill), ignore_errors=True)
-
+        source_root = os.path.join(SRC_SKILLS, skill)
+        for source in _source_files(source_root):
+            relative_inside = os.path.relpath(source, source_root)
+            add_file(
+                os.path.join(host.skills_dir, skill, relative_inside),
+                source,
+                localise_markdown=True,
+            )
     if host.commands_dir:
         for name in COMMANDS:
-            path = os.path.join(root, host.commands_dir, name)
-            if os.path.exists(path):
-                os.remove(path)
-
+            add_file(
+                os.path.join(host.commands_dir, name),
+                os.path.join(SRC_COMMANDS, name),
+                True,
+            )
     if host.hooks:
-        for name in HOOK_SCRIPTS:
-            path = os.path.join(root, host.ownership_root, "hooks", name)
-            if os.path.exists(path):
-                os.remove(path)
+        for name in _installed_hook_scripts(host):
+            add_file(
+                os.path.join(host.ownership_root, "hooks", name),
+                os.path.join(SRC_HOOKS, name),
+            )
+    for source in _source_files(SRC_SCRIPTS):
+        add_file(
+            os.path.join(
+                host.ownership_root,
+                "ai-research-skills",
+                "scripts",
+                os.path.relpath(source, SRC_SCRIPTS),
+            ),
+            source,
+        )
+    for source in _source_files(SRC_SCHEMAS):
+        add_file(
+            os.path.join(
+                host.ownership_root,
+                "ai-research-skills",
+                "schemas",
+                os.path.relpath(source, SRC_SCHEMAS),
+            ),
+            source,
+        )
+    return desired
 
-    shutil.rmtree(
-        os.path.join(root, host.ownership_root, "ai-research-skills"), ignore_errors=True
-    )
 
-    # Leave no empty shells behind, but never remove a directory the user put things in.
-    for rel in (host.skills_dir, host.commands_dir, f"{host.ownership_root}/hooks"):
-        if not rel:
-            continue
-        path = os.path.join(root, rel)
-        if os.path.isdir(path) and not os.listdir(path):
-            os.rmdir(path)
+def _manifest_path(root: str) -> str:
+    return _safe_path(root, MANIFEST_REL)
 
 
-def load_settings(path: str) -> dict:
+def _journal_path(root: str) -> str:
+    return _safe_path(root, JOURNAL_REL)
+
+
+def _read_manifest(root: str) -> dict[str, Any] | None:
+    path = _manifest_path(root)
     if not os.path.exists(path):
-        return {}
-    try:
-        with open(path, encoding="utf-8") as fh:
-            data = json.load(fh)
-    except (OSError, json.JSONDecodeError) as exc:
-        sys.exit(f"error: {path} is not valid JSON, refusing to touch it: {exc}")
-    if not isinstance(data, dict):
-        sys.exit(f"error: {path} is not a JSON object, refusing to touch it")
+        return None
+    data = _load_json(path)
+    if not _manifest_valid(data):
+        raise InstallerError(
+            ".ai-research-skills/manifest.json was modified or has an invalid "
+            "integrity seal"
+        )
+    if data.get("format") != MANIFEST_FORMAT or data.get("package") != "ai-research-skills":
+        raise InstallerError("manifest format/package is not owned by this installer")
+    if not isinstance(data.get("hosts"), dict):
+        raise InstallerError("manifest hosts is not an object")
+    for host_id, record in data["hosts"].items():
+        if not isinstance(host_id, str):
+            raise InstallerError("manifest host id is not a string")
+        if not isinstance(record, dict) or not isinstance(record.get("files"), dict):
+            raise InstallerError(f"manifest host {host_id!r} is malformed")
+        for relative, digest in record["files"].items():
+            if not isinstance(relative, str) or not isinstance(digest, str):
+                raise InstallerError(f"manifest file record for {host_id!r} is malformed")
+            _safe_path(root, relative)
+        handlers = record.get("handlers", [])
+        if not isinstance(handlers, list):
+            raise InstallerError(f"manifest host {host_id!r} handlers is not a list")
+        for handler in handlers:
+            if not isinstance(handler, dict):
+                raise InstallerError(f"manifest host {host_id!r} handler is malformed")
+    # File bytes are intentionally checked by the selected mutation/doctor paths rather
+    # than here.  A manifest with five changed files must produce five doctor items, not
+    # fail while reading the first one and hide the rest.
     return data
 
 
-def strip_ours(entries: list) -> list:
-    """Drop hook entries that run this suite's scripts; keep everything else."""
-    kept = []
-    for entry in entries:
-        hooks = entry.get("hooks") if isinstance(entry, dict) else None
-        if isinstance(hooks, list) and any(
-            isinstance(h, dict) and is_ours(str(h.get("command", ""))) for h in hooks
-        ):
+def _legacy_notice(root: str, host: hosts.Host) -> list[str]:
+    """List direct pre-v0.5 ``rs-*`` assets without inspecting or deleting them."""
+    found: list[str] = []
+    skills_root = _safe_path(root, host.skills_dir, allow_root=True)
+    if os.path.isdir(skills_root) and not os.path.islink(skills_root):
+        for name in sorted(os.listdir(skills_root)):
+            if not name.startswith("rs-"):
+                continue
+            path = _safe_path(root, os.path.join(host.skills_dir, name), allow_root=True)
+            if os.path.isdir(path) and not os.path.islink(path):
+                found.append(f"{host.skills_dir}/{name}/")
+    if host.commands_dir:
+        commands_root = _safe_path(root, host.commands_dir, allow_root=True)
+        if os.path.isdir(commands_root) and not os.path.islink(commands_root):
+            for name in sorted(os.listdir(commands_root)):
+                if not name.startswith("rs-"):
+                    continue
+                path = _safe_path(root, os.path.join(host.commands_dir, name))
+                if os.path.isfile(path) and not os.path.islink(path):
+                    found.append(f"{host.commands_dir}/{name}")
+    return found
+
+
+def _legacy_guard(root: str, host: hosts.Host) -> None:
+    found = _legacy_notice(root, host)
+    if found:
+        raise InstallerError(
+            "pre-v0.5 rs-* assets cannot coexist with ars-* automatically: "
+            + ", ".join(found)
+            + "; migrate or rename them manually. No legacy asset was deleted."
+        )
+
+
+def remove_legacy(root: str, host: hosts.Host) -> list[str]:
+    """Compatibility/migration report; legacy assets are never deleted."""
+    return _legacy_notice(os.path.abspath(root), host)
+
+
+def _manifest_host_record(
+    root: str, host: hosts.Host, desired: dict[str, bytes], settings: dict[str, Any]
+) -> dict[str, Any]:
+    files = {_relative(root, path): _sha256(data) for path, data in sorted(desired.items())}
+    adapter = hook_adapters.for_host(host)
+    config = os.path.join(host.ownership_root, host.hooks_file) if host.hooks else None
+    return {
+        "files": files,
+        "config": config.replace(os.sep, "/") if config else None,
+        "handlers": (
+            hook_adapters.handler_records(settings, host, root) if host.hooks else []
+        ),
+        "adapter": adapter.style,
+    }
+
+
+def _record_handlers(record: dict[str, Any]) -> list[dict[str, Any]]:
+    value = record.get("handlers")
+    return value if isinstance(value, list) else []
+
+
+def _handler_equal(left: dict[str, Any], right: dict[str, Any]) -> bool:
+    if "definition" in left:
+        return left.get("definition") == right.get("definition") and all(
+            left.get(key) == right.get(key) for key in ("event", "script", "matcher")
+        )
+    return all(
+        left.get(key) == right.get(key)
+        for key in ("event", "script", "command", "matcher", "timeout")
+    )
+
+
+def _check_handlers(
+    settings: dict[str, Any],
+    host: hosts.Host,
+    record: dict[str, Any] | None,
+    *,
+    root: str | None = None,
+    uninstall: bool = False,
+) -> list[str]:
+    if not host.hooks or record is None:
+        return []
+    actual = hook_adapters.handler_records(settings, host, root)
+    expected = _record_handlers(record)
+    modified: list[str] = []
+    # Missing handlers are safe to repair/remove.  Every command-shaped handler for a
+    # managed script that is present must, however, be an exact manifest definition.
+    for item in actual:
+        wanted = [
+            candidate
+            for candidate in expected
+            if candidate.get("script") == item.get("script")
+        ]
+        if wanted and not any(_handler_equal(item, candidate) for candidate in wanted):
+            modified.append(str(item.get("script", "handler")))
+    if modified and not uninstall:
+        raise InstallerError(
+            f"managed {host.id} hook handler was modified; refusing mutation: "
+            + ", ".join(sorted(set(modified)))
+        )
+    return sorted(set(modified))
+
+
+def _manifest_digest_for(manifest: dict[str, Any] | None, relative: str) -> str | None:
+    for record in ((manifest or {}).get("hosts") or {}).values():
+        if isinstance(record, dict):
+            files = record.get("files")
+            if isinstance(files, dict) and isinstance(files.get(relative), str):
+                return files[relative]
+    return None
+
+
+def _preflight_file_conflicts(
+    root: str,
+    desired: dict[str, bytes],
+    *,
+    manifest: dict[str, Any] | None,
+    old_record: dict[str, Any] | None = None,
+    legacy_hashes: dict[str, str] | None = None,
+) -> None:
+    """Reject unknown files, but allow an old owned hash to receive new source bytes."""
+    old_files = (old_record or {}).get("files", {})
+    if not isinstance(old_files, dict):
+        old_files = {}
+    legacy_hashes = legacy_hashes or {}
+    for path, data in desired.items():
+        # Repeat the ancestor check immediately before preflight/mutation.  It is a
+        # static-workspace boundary, not a claim of resistance to a privileged TOCTOU.
+        relative = _relative(root, path)
+        _safe_path(root, relative)
+        if not os.path.lexists(path):
             continue
-        kept.append(entry)
-    return kept
+        if stat.S_ISLNK(os.lstat(path).st_mode):
+            raise InstallerError(f"target file is a symlink: {relative}")
+        if not os.path.isfile(path):
+            raise InstallerError(f"same-name target is not a regular file: {relative}")
+        current = _read_bytes(path)
+        if current == data:
+            continue
+        old_digest = old_files.get(relative)
+        if not isinstance(old_digest, str):
+            old_digest = _manifest_digest_for(manifest, relative)
+        if old_digest and _sha256(current or b"") == old_digest:
+            continue
+        if legacy_hashes.get(relative) == _sha256(current or b""):
+            continue
+        raise InstallerError(f"same-name unknown/conflicting file: {relative}")
 
 
-def merge_hooks(settings: dict, uninstall: bool, host: hosts.Host) -> dict:
-    hooks = settings.get("hooks") if host.hooks_nested else settings
-    if not isinstance(hooks, dict):
-        hooks = {}
+def _managed_file_changes(
+    root: str,
+    old_record: dict[str, Any] | None,
+    desired: dict[str, bytes],
+    *,
+    uninstall: bool,
+) -> tuple[list[str], list[str]]:
+    """Return (unchanged stale paths to remove, modified paths to report)."""
+    if not isinstance(old_record, dict) or not isinstance(old_record.get("files"), dict):
+        return [], []
+    desired_rel = {_relative(root, path) for path in desired}
+    stale: list[str] = []
+    modified: list[str] = []
+    for relative, digest in old_record["files"].items():
+        target = _safe_path(root, relative)
+        if not os.path.lexists(target):
+            continue
+        if stat.S_ISLNK(os.lstat(target).st_mode):
+            raise InstallerError(f"manifest-managed path is a symlink: {relative}")
+        if not os.path.isfile(target):
+            raise InstallerError(f"manifest-managed path is not a regular file: {relative}")
+        current = _read_bytes(target) or b""
+        unchanged = isinstance(digest, str) and _sha256(current) == digest
+        if not unchanged:
+            modified.append(relative)
+            if not uninstall:
+                raise InstallerError(f"manifest-managed file was modified: {relative}")
+        elif relative not in desired_rel:
+            stale.append(target)
+    return stale, modified
 
-    for claude_event, matcher, script, timeout, conditions in HOOK_SPEC:
-        event = host.event_names.get(claude_event, claude_event)
-        entries = strip_ours(hooks.get(event, []))
-        if not uninstall:
-            # One hook entry per condition: a write to foo.py then matches none of them
-            # and no process is spawned at all. With no conditions (SessionStart, Stop)
-            # the single unconditional entry is the whole point.
-            base = {
-                "type": "command",
-                "command": hook_command(script, host),
-                "timeout": timeout,
-            }
-            # Only pre-filter where both the tool names and the condition syntax are
-            # verified. A condition that never matches disables the guard and reports
-            # nothing; spawning a process that exits immediately merely costs 22ms.
-            use = conditions if (conditions and host.filter_conditions) else ()
-            hook_entries: list[dict[str, Any]] = (
-                [dict(base, **{"if": cond}) for cond in use] if use else [base]
-            )
-            # Heterogeneous settings payload: a hook list under "hooks", a str under
-            # "matcher" — the dict literal alone would pin the value type to the list.
-            entry: dict[str, Any] = {"hooks": hook_entries}
-            if matcher is not None:
-                # Host-specific tool names: Codex writes via apply_patch, so a
-                # Claude-shaped Edit|Write matcher would miss every write it makes.
-                entry["matcher"] = (
-                    "|".join(host.write_tools) if host.write_tools else matcher
-                )
-            entries.append(entry)
-        if entries:
-            hooks[event] = entries
+
+def _load_legacy_fingerprint() -> dict[str, Any]:
+    path = os.path.join(ASSETS, LEGACY_FINGERPRINT_REL)
+    try:
+        with open(path, encoding="utf-8") as fh:
+            value = json.load(fh)
+    except (OSError, json.JSONDecodeError) as exc:
+        raise InstallerError(f"cannot load legacy fingerprint data: {exc}") from exc
+    if not isinstance(value, dict) or not isinstance(value.get("hosts"), dict):
+        raise InstallerError("legacy fingerprint data is malformed")
+    return value
+
+
+def _legacy_event_for(host: hosts.Host, canonical_event: str) -> str:
+    """Return the event name emitted by the pre-manifest v0.5 adapter."""
+    # Codex was root-level in v0.5; Cursor already used camelCase, but both used
+    # Claude-shaped grouped handler entries.  Keep this historical description
+    # separate from the current adapter so a layout change cannot widen adoption.
+    if host.id == "cursor":
+        return {
+            "PreToolUse": "preToolUse",
+            "PostToolUse": "postToolUse",
+            "SessionStart": "sessionStart",
+            "Stop": "stop",
+        }.get(canonical_event, canonical_event)
+    return canonical_event
+
+
+def _legacy_handler_shape(  # noqa: PLR0911
+    settings: dict[str, Any],
+    host: hosts.Host,
+    expected_commands: list[str],
+) -> bool:
+    """Check the complete grouped v0.5 config, not just command substrings."""
+    if not all(isinstance(command, str) for command in expected_commands):
+        return False
+    if host.id == "cursor" and not (
+        type(settings.get("version", 1)) is int and settings.get("version", 1) == 1
+    ):
+        return False
+    nested = host.id in {"claude", "cursor", "pi"}
+    container: object = settings.get("hooks") if nested else settings
+    if not isinstance(container, dict):
+        return False
+
+    expected: Counter[str] = Counter(expected_commands)
+    actual: Counter[str] = Counter()
+    conditions: Counter[tuple[str, str]] = Counter()
+    locations: dict[str, list[tuple[str, dict[str, Any], dict[str, Any]]]] = {}
+    timeout_by_script = {
+        script: timeout for _event, _matcher, script, timeout in hook_adapters._BASE_SPECS
+    }
+    event_by_script = {
+        script: {_legacy_event_for(host, event), event}
+        for event, _matcher, script, _timeout in hook_adapters._BASE_SPECS
+    }
+    expected_scripts: dict[str, str] = {}
+    for command in expected:
+        for script in hook_adapters.HOOK_SCRIPTS:
+            if command in hook_adapters.historical_command_forms(host, script):
+                expected_scripts[command] = script
+                break
         else:
-            hooks.pop(event, None)
+            return False
 
-    if not host.hooks_nested:
-        return hooks
-    if hooks:
-        settings["hooks"] = hooks
-        # Cursor 3.x refuses a project hooks.json without `version` and loads none of
-        # the hooks, reporting only in its settings UI.
-        for key, value in host.config_extra.items():
-            settings.setdefault(key, value)
-    else:
-        settings.pop("hooks", None)
-    return settings
+    for raw_event, raw_entries in container.items():
+        if not isinstance(raw_event, str) or not isinstance(raw_entries, list):
+            continue
+        for group in raw_entries:
+            if not isinstance(group, dict) or not isinstance(group.get("hooks"), list):
+                continue
+            matcher = group.get("matcher")
+            for handler in group["hooks"]:
+                if not isinstance(handler, dict):
+                    continue
+                command = handler.get("command")
+                if not isinstance(command, str):
+                    continue
+                script = expected_scripts.get(command)
+                if script is None:
+                    continue
+                actual[command] += 1
+                locations.setdefault(command, []).append((raw_event, handler, group))
+                if handler.get("type") != "command":
+                    return False
+                if handler.get("timeout") != timeout_by_script.get(script):
+                    return False
+                if script in {"bib_provenance_guard.py", "absence_claim_guard.py"}:
+                    tools = set(getattr(host, "write_tools", ()) or ())
+                    if not isinstance(matcher, str) or set(matcher.split("|")) != tools:
+                        return False
+                    if host.id == "claude":
+                        condition = handler.get("if")
+                        if not isinstance(condition, str):
+                            return False
+                        conditions[(script, condition)] += 1
+
+    if actual != expected:
+        return False
+    if host.id == "claude":
+        expected_conditions: Counter[tuple[str, str]] = Counter()
+        for script, values in hook_adapters._CLAUDE_CONDITIONS.items():
+            for condition in values:
+                expected_conditions[(script, condition)] += 1
+        if conditions != expected_conditions:
+            return False
+    # An exact historical command outside a grouped handler is not a complete
+    # fingerprint either; treating it as ours could delete a foreign direct entry.
+    all_exact = Counter(
+        command
+        for command in hook_adapters.all_config_commands(settings)
+        if command in expected
+    )
+    if all_exact != expected:
+        return False
+    for command, entries in locations.items():
+        script = expected_scripts[command]
+        wanted_events = event_by_script[script]
+        if any(event not in wanted_events for event, _h, _g in entries):
+            return False
+    return True
 
 
-def save_settings(path: str, settings: dict) -> None:
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="utf-8") as fh:
-        json.dump(settings, fh, indent=2)
-        fh.write("\n")
+def _legacy_adoption(
+    root: str, host: hosts.Host, settings: dict[str, Any]
+) -> tuple[bool, dict[str, str]]:
+    """Recognise a complete exact no-manifest v0.5 install, never a partial one."""
+    data = _load_legacy_fingerprint().get("hosts", {}).get(host.id)
+    if not isinstance(data, dict) or not isinstance(data.get("files"), dict):
+        return False, {}
+    hashes: dict[str, str] = {}
+    for relative, digest in data["files"].items():
+        if not isinstance(relative, str) or not isinstance(digest, str):
+            return False, {}
+        target = _safe_path(root, relative)
+        if not os.path.isfile(target) or stat.S_ISLNK(os.lstat(target).st_mode):
+            return False, {}
+        if _sha256(_read_bytes(target) or b"") != digest:
+            return False, {}
+        hashes[relative] = digest
+    if host.hooks:
+        expected_commands = data.get("handler_commands")
+        if not isinstance(expected_commands, list) or not _legacy_handler_shape(
+            settings, host, expected_commands
+        ):
+            return False, {}
+    return True, hashes
+
+
+def _legacy_stale_paths(
+    root: str, desired: dict[str, bytes], legacy_hashes: dict[str, str]
+) -> list[str]:
+    """Return exact old assets that the current host deliberately no longer owns."""
+    desired_rel = {_relative(root, path) for path in desired}
+    stale: list[str] = []
+    for relative, digest in legacy_hashes.items():
+        if relative in desired_rel:
+            continue
+        target = _safe_path(root, relative)
+        if os.path.isfile(target) and _sha256(_read_bytes(target) or b"") == digest:
+            stale.append(target)
+    return stale
+
+
+def strip_ours(entries: list[Any], host: hosts.Host | None = None) -> list[Any]:
+    return hook_adapters.strip_ours(entries, host or hosts.lookup("claude"))
+
+
+def merge_hooks(  # noqa: PLR0913, PLR0917
+    settings: dict[str, Any],
+    uninstall: bool,
+    host: hosts.Host,
+    root: str | None = None,
+    owned_records: list[dict[str, Any]] | None = None,
+    allow_legacy: bool = False,
+) -> dict[str, Any]:
+    return hook_adapters.merge(settings, uninstall, host, root, owned_records, allow_legacy)
+
+
+def save_settings(path: str, settings: dict[str, Any]) -> None:
+    mode = stat.S_IMODE(os.stat(path).st_mode) if os.path.exists(path) else 0o644
+    _atomic_json(path, settings, mode)
+
+
+_DIRECTORY_SYNC_ERRNOS = frozenset(
+    {
+        errno.EBADF,
+        errno.EINVAL,
+        errno.ENOSYS,
+        getattr(errno, "ENOTSUP", errno.EINVAL),
+        getattr(errno, "EOPNOTSUPP", errno.EINVAL),
+    }
+)
+
+
+def _directory_sync_unsupported(exc: OSError) -> bool:
+    """Whether an error means this platform cannot sync directory metadata."""
+    # Windows generally cannot open a directory as a normal file descriptor.  A
+    # missing errno is also common in capability probes and should not turn an
+    # otherwise atomic file operation into a failed transaction.
+    return os.name == "nt" or exc.errno is None or exc.errno in _DIRECTORY_SYNC_ERRNOS
+
+
+def _fsync_directory(path: str, *, strict: bool = False) -> None:
+    """Best-effort directory durability without weakening atomic file replacement.
+
+    ``strict`` still reports ordinary I/O errors during recovery, but capability
+    failures (including Windows directory-open/fsync errors) are intentionally
+    ignored.  The helper is kept separate so callers and tests can probe this
+    platform boundary without touching the replacement path.
+    """
+    try:
+        fd = os.open(path, os.O_RDONLY)
+    except OSError as exc:
+        if strict and not _directory_sync_unsupported(exc):
+            raise InstallerError(f"cannot open directory for fsync {path}: {exc}") from exc
+        return
+    try:
+        try:
+            os.fsync(fd)
+        except OSError as exc:
+            if strict and not _directory_sync_unsupported(exc):
+                raise InstallerError(f"cannot fsync directory {path}: {exc}") from exc
+    finally:
+        try:
+            os.close(fd)
+        except OSError as exc:
+            if strict and not _directory_sync_unsupported(exc):
+                raise InstallerError(
+                    f"cannot close directory for fsync {path}: {exc}"
+                ) from exc
+
+
+def _journal_unsigned(
+    root: str, backups: dict[str, tuple[bool, bytes | None, int]]
+) -> dict[str, Any]:
+    targets: dict[str, Any] = {}
+    for path, (existed, data, mode) in sorted(backups.items()):
+        relative = _relative(root, path)
+        targets[relative] = {
+            "exists": existed,
+            "mode": mode,
+            "data": (
+                base64.b64encode(data).decode("ascii")
+                if existed and data is not None
+                else None
+            ),
+        }
+    return {
+        "format": JOURNAL_FORMAT,
+        "root": os.path.abspath(root),
+        "targets": targets,
+    }
+
+
+def _seal_journal(unsigned: dict[str, Any]) -> dict[str, Any]:
+    result = copy.deepcopy(unsigned)
+    result["journal_sha256"] = _sha256(_canonical(result))
+    return result
+
+
+def _journal_valid(data: object) -> bool:
+    if not isinstance(data, dict) or data.get("format") != JOURNAL_FORMAT:
+        return False
+    supplied = data.get("journal_sha256")
+    if not isinstance(supplied, str):
+        return False
+    unsigned = dict(data)
+    unsigned.pop("journal_sha256", None)
+    return supplied == _sha256(_canonical(unsigned))
+
+
+def _remove_journal(root: str, *, strict: bool = False) -> None:
+    path = _journal_path(root)
+    if not os.path.lexists(path):
+        return
+    if stat.S_ISLNK(os.lstat(path).st_mode):
+        raise InstallerError("transaction journal is a symlink")
+    directory = os.path.dirname(path)
+    original = _read_bytes(path)
+    mode = stat.S_IMODE(os.stat(path).st_mode)
+    # Establish the directory state before and after unlink.  If the post-unlink
+    # fsync fails, put the sealed bytes back so the recovery record is not lost.
+    _fsync_directory(directory, strict=strict)
+    try:
+        os.unlink(path)
+        _fsync_directory(directory, strict=strict)
+    except Exception:
+        if original is not None and not os.path.lexists(path):
+            with contextlib.suppress(Exception):
+                _atomic_write(path, original, mode)
+        raise
+    metadata_dir = directory
+    if os.path.isdir(metadata_dir) and not os.listdir(metadata_dir):
+        try:
+            _fsync_directory(root, strict=strict)
+            os.rmdir(metadata_dir)
+            _fsync_directory(root, strict=strict)
+        except Exception:
+            # If the final project-directory fsync failed, restore the sealed
+            # journal before propagating the error.  A journal must not be lost
+            # merely because cosmetic metadata-directory cleanup was attempted.
+            if strict:
+                if original is not None and not os.path.lexists(path):
+                    with contextlib.suppress(Exception):
+                        _atomic_write(path, original, mode)
+                raise
+
+
+def _recover_journal(root: str) -> None:
+    """Restore an interrupted transaction before reading or mutating project state."""
+    root = os.path.abspath(root)
+    path = _journal_path(root)
+    if not os.path.lexists(path):
+        return
+    data = _load_json(path)
+    if not _journal_valid(data) or data.get("root") != root:
+        raise InstallerError(
+            "transaction journal is modified or has an invalid integrity seal"
+        )
+    targets = data.get("targets")
+    if not isinstance(targets, dict):
+        raise InstallerError("transaction journal targets are malformed")
+
+    failures: list[str] = []
+    directories: set[str] = {root, os.path.dirname(path)}
+    for relative, snapshot in sorted(targets.items(), key=lambda item: item[0].count("/")):
+        target_label = str(relative)
+        try:
+            if not isinstance(relative, str) or not isinstance(snapshot, dict):
+                raise InstallerError("transaction journal target is malformed")
+            target = _safe_path(root, relative)
+            _safe_path(root, relative)  # immediately before every recovery mutation
+            directory = os.path.dirname(target)
+            directories.add(directory)
+            if os.path.lexists(target) and stat.S_ISLNK(os.lstat(target).st_mode):
+                raise InstallerError(f"cannot recover through symlink: {relative}")
+            exists_value = snapshot.get("exists")
+            if not isinstance(exists_value, bool):
+                raise InstallerError("transaction journal snapshot exists is not boolean")
+            existed = exists_value
+            if existed:
+                encoded = snapshot.get("data")
+                mode = snapshot.get("mode", 0o644)
+                if not isinstance(encoded, str) or not isinstance(mode, int):
+                    raise InstallerError("transaction journal snapshot is malformed")
+                try:
+                    original = base64.b64decode(encoded.encode("ascii"), validate=True)
+                except (ValueError, TypeError) as exc:
+                    raise InstallerError(
+                        "transaction journal contains invalid bytes"
+                    ) from exc
+                _safe_path(root, _relative(root, directory), allow_root=True)
+                os.makedirs(directory, exist_ok=True)
+                _safe_path(root, relative)
+                _atomic_write(target, original, mode)
+                _fsync_directory(directory, strict=True)
+            elif os.path.lexists(target):
+                if stat.S_ISLNK(os.lstat(target).st_mode):
+                    raise InstallerError(f"cannot remove recovered symlink: {relative}")
+                os.unlink(target)
+                _fsync_directory(directory, strict=True)
+        except Exception as exc:
+            failures.append(f"{target_label}: {exc}")
+
+    # A successful atomic replace is not enough: all affected directories and the
+    # project root must be synced before the sealed journal may be removed.
+    for directory in sorted(directories):
+        if not os.path.isdir(directory) or os.path.islink(directory):
+            continue
+        try:
+            _fsync_directory(directory, strict=True)
+        except Exception as exc:
+            failures.append(f"directory {directory}: {exc}")
+    if failures:
+        raise InstallerError(
+            "transaction recovery failed; sealed journal retained: " + "; ".join(failures)
+        )
+    try:
+        _remove_journal(root, strict=True)
+    except Exception as exc:
+        raise InstallerError(
+            f"transaction recovery could not remove sealed journal; journal retained: {exc}"
+        ) from exc
+
+
+class _Transaction:
+    def __init__(self, root: str, targets: Iterable[str]) -> None:
+        self.root = os.path.abspath(root)
+        self.backups: dict[str, tuple[bool, bytes | None, int]] = {}
+        self.created_dirs: list[str] = []
+        self.done = False
+        for raw_path in targets:
+            path = _safe_path(self.root, _relative(self.root, raw_path))
+            if path in self.backups:
+                continue
+            if os.path.lexists(path) and stat.S_ISLNK(os.lstat(path).st_mode):
+                raise InstallerError(
+                    f"transaction target is a symlink: {_relative(self.root, path)}"
+                )
+            if os.path.isfile(path):
+                self.backups[path] = (
+                    True,
+                    _read_bytes(path),
+                    stat.S_IMODE(os.stat(path).st_mode),
+                )
+            elif os.path.lexists(path):
+                raise InstallerError(
+                    "transaction target is not a regular file: "
+                    f"{_relative(self.root, path)}"
+                )
+            else:
+                self.backups[path] = (False, None, 0o644)
+        journal = _seal_journal(_journal_unsigned(self.root, self.backups))
+        _atomic_json(_journal_path(self.root), journal)
+
+    def _verify(self, path: str) -> str:
+        relative = _relative(self.root, path)
+        _safe_path(self.root, relative)
+        return relative
+
+    def mkdirs(self, path: str) -> None:
+        relative = _relative(self.root, path)
+        _safe_path(self.root, relative, allow_root=True)
+        missing: list[str] = []
+        current = path
+        while not os.path.exists(current):
+            missing.append(current)
+            parent = os.path.dirname(current)
+            if parent == current:
+                break
+            current = parent
+        os.makedirs(path, exist_ok=True)
+        _safe_path(self.root, relative, allow_root=True)
+        self.created_dirs.extend(reversed(missing))
+
+    def write(self, path: str, data: bytes) -> None:
+        self._verify(path)
+        existed, old_data, mode = self.backups[path]
+        self.mkdirs(os.path.dirname(path) or self.root)
+        self._verify(path)  # repeat after directory creation, immediately before write
+        if existed and old_data == data:
+            return
+        _atomic_write(path, data, mode)
+
+    def remove(self, path: str) -> None:
+        self._verify(path)
+        if not os.path.lexists(path):
+            return
+        self._verify(path)
+        if stat.S_ISLNK(os.lstat(path).st_mode):
+            raise InstallerError(f"refusing to remove symlink: {path}")
+        os.unlink(path)
+        _fsync_directory(os.path.dirname(path))
+
+    def rollback(self) -> list[str]:
+        """Restore every snapshot and report, rather than hide, rollback failures."""
+        failures: list[str] = []
+        journal_dir = os.path.dirname(_journal_path(self.root))
+        directories: set[str] = {self.root, journal_dir}
+        # Restore in reverse target order.  Each file uses the same atomic replace
+        # path as normal writes; a failed restore leaves the sealed journal intact.
+        for path, (existed, data, mode) in reversed(list(self.backups.items())):
+            relative = _relative(self.root, path)
+            directory = os.path.dirname(path)
+            directories.add(directory)
+            try:
+                self._verify(path)
+                if existed:
+                    if data is None:
+                        raise InstallerError(f"snapshot for {relative} has no bytes")
+                    self.mkdirs(directory)
+                    self._verify(path)
+                    _atomic_write(path, data, mode)
+                    _fsync_directory(directory, strict=True)
+                elif os.path.lexists(path):
+                    if stat.S_ISLNK(os.lstat(path).st_mode):
+                        raise InstallerError(
+                            f"refusing to remove recovered symlink: {relative}"
+                        )
+                    os.unlink(path)
+                    _fsync_directory(directory, strict=True)
+            except Exception as exc:
+                failures.append(f"{relative}: {exc}")
+        for directory in sorted(set(self.created_dirs), key=len, reverse=True):
+            try:
+                if os.path.isdir(directory) and not os.path.islink(directory):
+                    os.rmdir(directory)
+            except OSError as exc:
+                failures.append(f"directory {directory}: {exc}")
+        for directory in sorted(directories):
+            if not os.path.isdir(directory) or os.path.islink(directory):
+                continue
+            try:
+                _fsync_directory(directory, strict=True)
+            except Exception as exc:
+                failures.append(f"directory {directory}: {exc}")
+        if failures:
+            return failures
+        try:
+            _remove_journal(self.root, strict=True)
+        except Exception as exc:
+            failures.append(f"journal: {exc}")
+        return failures
+
+    def commit(self) -> None:
+        _remove_journal(self.root, strict=True)
+        self.done = True
+
+
+def _apply(root: str, plan: dict[str, Any], uninstall: bool) -> None:
+    targets: list[str] = []
+    for host_plan in plan["hosts"]:
+        targets.extend(host_plan.get("desired", {}).keys())
+        targets.extend(host_plan.get("stale_paths", []))
+        targets.extend(host_plan.get("remove_paths", []))
+        config_path = host_plan.get("config_path")
+        if config_path:
+            targets.append(config_path)
+    targets.append(_manifest_path(root))
+    transaction = _Transaction(root, targets)
+    try:
+        for host_plan in plan["hosts"]:
+            desired: dict[str, bytes] = host_plan["desired"]
+            if uninstall:
+                for path in host_plan["remove_paths"]:
+                    transaction.remove(path)
+            else:
+                for path in host_plan.get("stale_paths", []):
+                    transaction.remove(path)
+                for path, data in desired.items():
+                    transaction.write(path, data)
+            config_path = host_plan.get("config_path")
+            settings = host_plan.get("new_settings")
+            if config_path and settings is not None:
+                transaction.write(
+                    config_path,
+                    (json.dumps(settings, indent=2, ensure_ascii=False) + "\n").encode(),
+                )
+        manifest_path = _manifest_path(root)
+        if plan["manifest"] is None:
+            transaction.remove(manifest_path)
+        else:
+            transaction.write(
+                manifest_path,
+                (
+                    json.dumps(plan["manifest"], indent=2, ensure_ascii=False) + "\n"
+                ).encode(),
+            )
+        transaction.commit()
+    except Exception as original:
+        rollback_errors = transaction.rollback()
+        if rollback_errors:
+            detail = "; ".join(rollback_errors)
+            raise InstallerError(
+                f"transaction failed: {original}; rollback failed: {detail}"
+            ) from original
+        raise
+
+
+def _build_plan(
+    root: str, selected: tuple[hosts.Host, ...], uninstall: bool
+) -> dict[str, Any]:
+    manifest = _read_manifest(root)
+    existing_hosts = dict((manifest or {}).get("hosts") or {})
+    host_plans: list[dict[str, Any]] = []
+    next_hosts = dict(existing_hosts)
+
+    for host in selected:
+        # This is deliberately before any plan can be applied.  Legacy assets are user
+        # data; even a byte-for-byte old copy is not silently removed.
+        _legacy_guard(root, host)
+        desired = _desired_files(root, host)
+        config_path = (
+            _safe_path(root, os.path.join(host.ownership_root, host.hooks_file))
+            if host.hooks
+            else None
+        )
+        settings = (
+            load_settings(config_path)
+            if config_path and os.path.exists(config_path)
+            else {}
+        )
+        if (
+            host.hooks
+            and "hooks" in settings
+            and not isinstance(settings.get("hooks"), dict)
+        ):
+            raise InstallerError(
+                f"{host.ownership_root}/{host.hooks_file} has a non-object hooks key"
+            )
+        if host.id == "cursor" and not (
+            type(settings.get("version", 1)) is int and settings.get("version", 1) == 1
+        ):
+            raise InstallerError(
+                "Cursor hooks.json version must be 1 when explicitly present"
+            )
+        old_record = existing_hosts.get(host.id)
+        if old_record is not None and not isinstance(old_record, dict):
+            raise InstallerError(f"manifest host {host.id!r} is malformed")
+        owned_records = (
+            _record_handlers(old_record) if isinstance(old_record, dict) else None
+        )
+        modified_handlers = _check_handlers(
+            settings,
+            host,
+            old_record,
+            root=root,
+            uninstall=uninstall,
+        )
+        stale_paths, modified_files = _managed_file_changes(
+            root, old_record, desired, uninstall=uninstall
+        )
+        legacy_complete, legacy_hashes = (
+            _legacy_adoption(root, host, settings) if manifest is None else (False, {})
+        )
+        if legacy_complete and not uninstall:
+            stale_paths.extend(_legacy_stale_paths(root, desired, legacy_hashes))
+
+        if uninstall:
+            if old_record is not None:
+                remove_paths: list[str] = []
+                for relative, digest in old_record.get("files", {}).items():
+                    target = _safe_path(root, relative)
+                    if not os.path.lexists(target):
+                        continue
+                    if _sha256(_read_bytes(target) or b"") == digest:
+                        remove_paths.append(target)
+            else:
+                # Without a manifest, only a complete historical install or files that
+                # exactly equal today's source may be adopted for removal.
+                _preflight_file_conflicts(
+                    root,
+                    desired,
+                    manifest=None,
+                    legacy_hashes=legacy_hashes if legacy_complete else None,
+                )
+                remove_paths = [
+                    path
+                    for path in desired
+                    if os.path.isfile(path)
+                    and (
+                        _sha256(_read_bytes(path) or b"") == _sha256(desired[path])
+                        or legacy_hashes.get(_relative(root, path))
+                        == _sha256(_read_bytes(path) or b"")
+                    )
+                ]
+                if legacy_complete:
+                    remove_paths.extend(_legacy_stale_paths(root, desired, legacy_hashes))
+            new_settings = (
+                merge_hooks(
+                    settings,
+                    True,
+                    host,
+                    root,
+                    owned_records,
+                    allow_legacy=legacy_complete,
+                )
+                if host.hooks and os.path.exists(config_path or "")
+                else None
+            )
+            if new_settings == settings:
+                # Do not rewrite a foreign config during a no-op uninstall;
+                # ownership is not inferred from a historical command string.
+                new_settings = None
+            next_hosts.pop(host.id, None)
+        else:
+            _preflight_file_conflicts(
+                root,
+                desired,
+                manifest=manifest,
+                old_record=old_record,
+                legacy_hashes=legacy_hashes if legacy_complete else None,
+            )
+            new_settings = (
+                merge_hooks(
+                    settings,
+                    False,
+                    host,
+                    root,
+                    owned_records,
+                    allow_legacy=legacy_complete,
+                )
+                if host.hooks
+                else None
+            )
+            record_settings = new_settings if new_settings is not None else settings
+            next_hosts[host.id] = _manifest_host_record(
+                root, host, desired, record_settings
+            )
+            remove_paths = []
+        host_plans.append(
+            {
+                "host": host,
+                "desired": desired,
+                "config_path": config_path,
+                "new_settings": new_settings,
+                "remove_paths": remove_paths,
+                "stale_paths": [] if uninstall else stale_paths,
+                "modified_files": modified_files,
+                "modified_handlers": modified_handlers,
+            }
+        )
+
+    # All manifests and all configs were read/validated before any mutation.  Preserve
+    # foreign hosts in a multi-host manifest; selected hosts are the only records changed.
+    next_manifest = None
+    if next_hosts:
+        next_manifest = _seal_manifest(
+            {
+                "format": MANIFEST_FORMAT,
+                "package": "ai-research-skills",
+                "version": __version__,
+                "hosts": next_hosts,
+            }
+        )
+    return {"hosts": host_plans, "manifest": next_manifest}
+
+
+def _prune_empty(root: str, host: hosts.Host) -> None:
+    for relative in (
+        os.path.join(host.skills_dir),
+        os.path.join(
+            host.commands_dir or "",
+        ),
+        os.path.join(host.ownership_root, "hooks"),
+    ):
+        if not relative:
+            continue
+        try:
+            path = _safe_path(root, relative, allow_root=True)
+            if os.path.isdir(path) and not os.listdir(path):
+                os.rmdir(path)
+        except (InstallerError, OSError):
+            pass
+
+
+def _selected(root: str, requested: str | None) -> tuple[tuple[hosts.Host, ...], int]:
+    chosen, unknown = hosts.resolve(root, requested)
+    for bad in unknown:
+        print(f"unknown host {bad!r} — known: {', '.join(hosts.known_ids())}")
+    return chosen, 2 if unknown or not chosen else 0
+
+
+def _ensure_install_root(root: str) -> bool:
+    root = os.path.abspath(root)
+    if os.path.lexists(root):
+        if stat.S_ISLNK(os.lstat(root).st_mode) or not os.path.isdir(root):
+            raise InstallerError(f"target root is not a real directory: {root}")
+        return False
+    os.makedirs(root)
+    return True
+
+
+@contextlib.contextmanager
+def _install_lock(root: str, create_root: bool = True) -> Generator[bool, None, None]:
+    """Hold the stable path lock, then the current root-inode lock.
+
+    The path lock is acquired before looking at or creating the root and remains held
+    until the mutation (and any exception cleanup) is complete.  An inode lock is
+    acquired only for an existing root, and its identity is checked again after the
+    blocking acquisition so a deleted/recreated root can never enter with a stale
+    lock.
+    """
+    root = os.path.abspath(root)
+    path_lock = _project_path_lock(root)
+    with path_lock:
+        while True:
+            created = _ensure_install_root(root) if create_root else False
+            if not create_root and not os.path.lexists(root):
+                # The path lock made a concurrent creator finish (or clean up) before
+                # this no-op observes the missing root.
+                yield False
+                return
+
+            cleanup_created = created
+            try:
+                inode_lock = _project_lock(root)
+                with contextlib.ExitStack() as inode_locks:
+                    # On filesystems without usable inode numbers, the inode helper
+                    # deliberately falls back to the path identity.  The path lock is
+                    # then already the required lock; opening it a second time would
+                    # self-deadlock with flock/msvcrt.
+                    if inode_lock.identity != path_lock.identity:
+                        inode_locks.enter_context(inode_lock)
+                    # inode_lock may have waited while an external/legacy operation
+                    # removed or replaced the root.  Still holding path_lock, retry
+                    # from the new filesystem state instead of yielding under a stale
+                    # identity.
+                    if _project_root_identity(root) != inode_lock.identity:
+                        cleanup_created = False
+                        continue
+                    try:
+                        yield created
+                    except BaseException:
+                        if cleanup_created:
+                            with contextlib.suppress(OSError):
+                                os.rmdir(root)
+                            cleanup_created = False
+                        raise
+                    return
+            except BaseException:
+                if cleanup_created:
+                    with contextlib.suppress(OSError):
+                        os.rmdir(root)
+                raise
 
 
 def install(root: str, requested: str | None = None) -> int:
-    selected, unknown = hosts.resolve(root, requested)
-    for bad in unknown:
-        print(f"unknown host {bad!r} — known: {', '.join(hosts.known_ids())}")
-    if unknown:
-        return 2
-
-    for host in selected:
-        print(f"{host.id}:")
-        for path in remove_legacy(root, host):
-            print(f"  removed   {path}  (pre-v0.5 `rs-` name)")
-        for path in install_files(root, host):
-            print(f"  installed {path}")
-        if host.hooks:
-            settings_path = os.path.join(root, host.ownership_root, host.hooks_file)
-            save_settings(
-                settings_path, merge_hooks(load_settings(settings_path), False, host)
+    root = os.path.abspath(root)
+    try:
+        with _install_lock(root, create_root=True) as created_root:
+            _recover_journal(root)
+            selected, rc = _selected(root, requested)
+            if rc:
+                # An unknown-host early return is still inside both locks.  Otherwise a
+                # waiter could observe the just-created empty root before it is removed.
+                if created_root:
+                    with contextlib.suppress(OSError):
+                        os.rmdir(root)
+                return rc
+            plan = _build_plan(root, selected, False)
+            _apply(root, plan, False)
+            for host in selected:
+                print(f"{host.id}:")
+                legacy = _legacy_notice(root, host)
+                for path in legacy:
+                    print(
+                        f"  preserved {path}  "
+                        "(unknown pre-v0.5 rs-* asset; migrate manually)"
+                    )
+                for path in _desired_files(root, host):
+                    print(
+                        "  configured "
+                        + path.removeprefix(root + os.sep).replace(os.sep, "/")
+                    )
+                if host.hooks:
+                    print(
+                        f"  configured {host.ownership_root}/{host.hooks_file} "
+                        f"({hook_adapters.for_host(host).style} adapter)"
+                    )
+                caveat = hook_adapters.caveat(host) or host.caveat
+                if caveat:
+                    print(f"  note: {caveat}")
+            print(
+                f"\nai-research-skills configured for: "
+                f"{', '.join(host.id for host in selected)}"
             )
-            print(f"  hooks merged into {host.ownership_root}/{host.hooks_file}")
-        if host.caveat:
-            print(f"  note: {host.caveat}")
-
-    names = ", ".join(host.id for host in selected)
-    guarded = [host.id for host in selected if host.hooks]
-    unguarded = [host.id for host in selected if not host.hooks]
-    commanded = [host.id for host in selected if host.commands_dir]
-    uncommanded = [host.id for host in selected if not host.commands_dir]
-
-    print(f"\nai-research-skills installed into {root} for: {names}")
-    print(
-        f"Guardrails active on: {', '.join(guarded) if guarded else 'none of these hosts'}"
-    )
-    if unguarded:
-        print(
-            f"  not on: {', '.join(unguarded)} — ask for the `ars-red-team` and "
-            "`ars-verify` skills by name before trusting a draft."
-        )
-    # Only Claude Code has a slash-command surface. Announcing seven commands to a Codex
-    # user who received none is the same class of untruth as installing the methodology
-    # without the enforcement and calling it protection.
-    if commanded:
-        print(
-            f"Commands ({', '.join(commanded)}): /ars-survey /ars-gate /ars-relwork "
-            "/ars-brief /ars-watch /ars-audit /ars-help"
-        )
-    if uncommanded:
-        print(
-            f"No slash commands on: {', '.join(uncommanded)} — the skills there trigger "
-            'from their descriptions, or by name: "run ars-survey on <topic>".'
-        )
-    print(
-        "Search backends are configured separately — see docs/SETUP.md "
-        "(arxiv MCP required, openalex and tavily recommended)."
-    )
-    return 0
+            print("Ownership manifest: .ai-research-skills/manifest.json (SHA256 sealed)")
+            commanded = [host.id for host in selected if host.commands_dir]
+            if commanded:
+                print(
+                    f"Commands ({', '.join(commanded)}): /ars-survey /ars-gate "
+                    "/ars-relwork /ars-brief /ars-watch /ars-audit /ars-help"
+                )
+            uncommanded = [host.id for host in selected if not host.commands_dir]
+            if uncommanded:
+                print(
+                    f"No slash commands on: {', '.join(uncommanded)} — invoke the "
+                    "installed skills by name."
+                )
+            print("Search backends are configured separately — see docs/SETUP.md.")
+            return 0
+    except Exception as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
 
 
 def uninstall(root: str, requested: str | None = None) -> int:
-    selected, unknown = hosts.resolve(root, requested)
-    for bad in unknown:
-        print(f"unknown host {bad!r} — known: {', '.join(hosts.known_ids())}")
-    if unknown:
-        return 2
+    root = os.path.abspath(root)
+    try:
+        with _install_lock(root, create_root=False):
+            if not os.path.lexists(root):
+                print(f"ai-research-skills removed from {root} (nothing installed)")
+                return 0
+            _recover_journal(root)
+            selected, rc = _selected(root, requested)
+            if rc:
+                return rc
+            plan = _build_plan(root, selected, True)
+            _apply(root, plan, True)
+            for host_plan in plan["hosts"]:
+                host = host_plan["host"]
+                for path in host_plan.get("modified_files", []):
+                    print(f"  preserved {path}  (managed file was modified)")
+                for script in host_plan.get("modified_handlers", []):
+                    print(
+                        f"  preserved handler {script}  (managed definition was modified)"
+                    )
+                legacy = _legacy_notice(root, host)
+                for path in legacy:
+                    print(
+                        f"  preserved {path}  (pre-v0.5 rs-* asset; no deletion performed)"
+                    )
+                _prune_empty(root, host)
+            print(
+                f"ai-research-skills removed from {root} for: "
+                f"{', '.join(host.id for host in selected)}"
+            )
+            return 0
+    except Exception as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
 
-    for host in selected:
-        remove_files(root, host)
-        if host.hooks:
-            settings_path = os.path.join(root, host.ownership_root, host.hooks_file)
-            if os.path.exists(settings_path):
-                save_settings(
-                    settings_path, merge_hooks(load_settings(settings_path), True, host)
-                )
-    names = ", ".join(host.id for host in selected)
-    print(f"ai-research-skills removed from {root} for: {names}")
-    return 0
+
+def install_files(root: str, host: hosts.Host) -> list[str]:
+    """Compatibility helper: install one host through the same safe transaction."""
+    root = os.path.abspath(root)
+    with _install_lock(root, create_root=True):
+        _recover_journal(root)
+        plan = _build_plan(root, (host,), False)
+        _apply(root, plan, False)
+        return list(plan["hosts"][0]["desired"])
 
 
-def settings_has_hook(hooks: dict, event: str, script: str) -> bool:
+def remove_files(root: str, host: hosts.Host) -> None:
+    root = os.path.abspath(root)
+    with _install_lock(root, create_root=False):
+        if not os.path.lexists(root):
+            return
+        _recover_journal(root)
+        plan = _build_plan(root, (host,), True)
+        _apply(root, plan, True)
+
+
+def settings_has_hook(
+    hooks: dict[str, Any],
+    event: str,
+    script: str,
+    host: hosts.Host | None = None,
+    root: str | None = None,
+) -> bool:
+    host = host or hosts.lookup("claude")
+    if not isinstance(hooks, dict):
+        return False
     entries = hooks.get(event)
     if not isinstance(entries, list):
         return False
-    for entry in entries:
-        entry_hooks = entry.get("hooks") if isinstance(entry, dict) else None
-        if isinstance(entry_hooks, list) and any(
-            isinstance(h, dict) and script in str(h.get("command", "")) for h in entry_hooks
-        ):
-            return True
-    return False
+    if hook_adapters.for_host(host).style == "direct":
+        return any(
+            isinstance(entry, dict)
+            and hook_adapters.script_for_command(
+                entry.get("command"), host, root, allow_absolute_without_root=root is None
+            )
+            == script
+            for entry in entries
+        )
+    return any(
+        isinstance(entry, dict)
+        and any(
+            hook_adapters.script_for_command(
+                handler.get("command"), host, root, allow_absolute_without_root=root is None
+            )
+            == script
+            for handler in entry.get("hooks", [])
+            if isinstance(handler, dict)
+        )
+        for entry in entries
+    )
 
 
-def read_settings_quiet(path: str) -> dict | None:
-    """settings.json as a dict, or None when missing, unreadable or not an object."""
+def read_settings_quiet(path: str) -> dict[str, Any] | None:
     try:
-        with open(path, encoding="utf-8") as fh:
-            data = json.load(fh)
-    except (OSError, json.JSONDecodeError):
+        return _load_json(path)
+    except InstallerError:
         return None
-    return data if isinstance(data, dict) else None
+
+
+def _path_is_within(path: str, directory: str) -> bool:
+    try:
+        common = os.path.commonpath((path, directory))
+    except (OSError, ValueError):
+        return False
+    return os.path.normcase(common) == os.path.normcase(directory)
+
+
+def _supported_python_launcher(path: str) -> bool:
+    name = os.path.basename(path).casefold()
+    if name.endswith(".exe"):
+        name = name[:-4]
+    if name == "python":
+        return True
+    if not name.startswith("python"):
+        return False
+    version = name.removeprefix("python").split(".")
+    return len(version) in (1, 2) and all(
+        part and all("0" <= character <= "9" for character in part) for part in version
+    )
+
+
+def _standard_interpreter_paths(base_prefix: str) -> tuple[str, ...]:
+    version = sys.version_info
+    names = (
+        "python",
+        f"python{version.major}",
+        f"python{version.major}.{version.minor}",
+        "python.exe",
+        f"python{version.major}.exe",
+        f"python{version.major}.{version.minor}.exe",
+    )
+    directories = (
+        base_prefix,
+        os.path.join(base_prefix, "bin"),
+        os.path.join(base_prefix, "Scripts"),
+    )
+    return tuple(
+        os.path.join(directory, name) for directory in directories for name in names
+    )
+
+
+def _path_value(value: object) -> str | None:
+    if not isinstance(value, (str, bytes, os.PathLike)):
+        return None
+    try:
+        raw = os.fspath(value)
+        if isinstance(raw, bytes):
+            raw = os.fsdecode(raw)
+        return os.path.abspath(raw) if isinstance(raw, str) and raw else None
+    except (OSError, TypeError, ValueError):
+        return None
+
+
+def _trusted_executable(value: object) -> str | None:
+    """Accept only a regular executable statically proven to be the base Python."""
+    raw = _path_value(value)
+    base_raw = _path_value(getattr(sys, "base_prefix", None))
+    if raw is None or base_raw is None:
+        return None
+    try:
+        candidate = os.path.realpath(raw)
+        base_prefix = os.path.realpath(base_raw)
+        mode = os.stat(candidate).st_mode
+    except (OSError, ValueError):
+        return None
+    if (
+        not os.path.isdir(base_prefix)
+        or not _path_is_within(candidate, base_prefix)
+        or not stat.S_ISREG(mode)
+        or not os.access(candidate, os.X_OK)
+    ):
+        return None
+    if _supported_python_launcher(candidate):
+        return candidate
+    for standard in _standard_interpreter_paths(base_prefix):
+        try:
+            if os.path.samefile(candidate, standard):
+                return candidate
+        except (OSError, ValueError):
+            continue
+    return None
+
+
+def _trusted_python_executable() -> str | None:
+    """Return the interpreter independent of PYTHONEXECUTABLE when available.
+
+    ``sys.executable`` is mutable on macOS through PYTHONEXECUTABLE.  The base
+    interpreter is populated before that override and is also the right target for
+    virtual environments and Windows.  There is no safe fallback to an arbitrary
+    ``sys.executable``: if the base path is unavailable, the self-test must fail
+    closed rather than execute a path whose provenance cannot be established.
+    """
+    return _trusted_executable(getattr(sys, "_base_executable", None))
+
+
+def _verify_installed_validator(root: str, host: hosts.Host) -> bool:
+    """Check installed validator bytes, then self-test only trusted package code."""
+    installed_dir = os.path.join(host.ownership_root, "ai-research-skills", "scripts")
+    try:
+        for name in VALIDATOR_RUNTIME_ASSETS:
+            path = _safe_path(root, os.path.join(installed_dir, name))
+            if not os.path.isfile(path) or os.path.islink(path):
+                return False
+            source = _read_bytes(os.path.join(SRC_SCRIPTS, name))
+            installed = _read_bytes(path)
+            if source is None or installed != source:
+                return False
+    except InstallerError:
+        return False
+
+    trusted_python = _trusted_python_executable()
+    if trusted_python is None:
+        return False
+    trusted_validator = os.path.join(SRC_SCRIPTS, "rs_validate.py")
+    trusted_env = {
+        name: value
+        for name, value in os.environ.items()
+        if not name.upper().startswith("PYTHON")
+    }
+    trusted_env["ARS_FORCE_FALLBACK"] = "1"
+    try:
+        result = subprocess.run(
+            [trusted_python, "-I", "-S", trusted_validator, "--self-test"],
+            capture_output=True,
+            text=True,
+            check=False,
+            env=trusted_env,
+            timeout=5.0,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return result.returncode == 0
+
+
+def _doctor_manifest(root: str, manifest: dict[str, Any] | None) -> tuple[bool, str]:
+    if manifest is None:
+        return False, "manifest missing"
+    try:
+        _read_manifest(root)
+    except InstallerError as exc:
+        return False, str(exc)
+    return True, ""
 
 
 def doctor(root: str, requested: str | None = None) -> int:
-    """Check an installation item by item, per host. Exit 1 if anything is missing."""
-    selected, unknown = hosts.resolve(root, requested)
-    for bad in unknown:
-        print(f"unknown host {bad!r} — known: {', '.join(hosts.known_ids())}")
-    if unknown:
-        return 2
-
-    missing = 0
-    any_installed = False
-
-    def item(label: str, present: bool) -> None:
-        nonlocal missing
-        if not present:
-            missing += 1
-        print(f"  {'ok  ' if present else 'MISS'} {label}")
-
+    root = os.path.abspath(root)
+    selected, rc = _selected(root, requested)
+    if rc:
+        return rc
+    try:
+        manifest = _read_manifest(root)
+    except InstallerError as exc:
+        print(f"error: {exc}")
+        return 1
+    if manifest is None:
+        print("error: manifest missing")
+        return 1
     print(f"ai-research-skills doctor — {root}")
     print(f"hosts: {', '.join(host.id for host in selected)}\n")
+    failures = 0
+    any_installed = False
 
+    def item(label: str, ok: bool, detail: str = "") -> None:
+        nonlocal failures
+        if not ok:
+            failures += 1
+        print(f"  {'ok  ' if ok else 'MISS'} {label}" + (f" — {detail}" if detail else ""))
+
+    manifest_hosts = (manifest or {}).get("hosts", {}) if isinstance(manifest, dict) else {}
+    item("manifest present and SHA256 valid", manifest is not None)
     for host in selected:
-        # A host the project uses but never installed into is not broken. Only count
-        # missing files when something IS installed there — that means real breakage.
-        installed_here = any(
+        record = manifest_hosts.get(host.id) if isinstance(manifest_hosts, dict) else None
+        installed = isinstance(record, dict) or any(
             os.path.isfile(os.path.join(root, host.skills_dir, skill, "SKILL.md"))
             for skill in SKILLS
         )
-        if not installed_here:
+        if not installed:
             print(f"{host.id} — not installed")
-            print(f"  hint  ai-research-skills install {root} --host {host.id}\n")
             continue
         any_installed = True
-
+        if not isinstance(record, dict):
+            item(f"{host.id} manifest host record", False)
         print(f"{host.id} — suite files")
         for skill in SKILLS:
             item(
@@ -510,71 +1859,111 @@ def doctor(root: str, requested: str | None = None) -> int:
                     os.path.isfile(os.path.join(root, host.commands_dir, name)),
                 )
         if host.hooks:
-            for name in HOOK_SCRIPTS:
+            for name in _installed_hook_scripts(host):
                 item(
                     f"{host.ownership_root}/hooks/{name}",
                     os.path.isfile(os.path.join(root, host.ownership_root, "hooks", name)),
                 )
         support = os.path.join(root, host.ownership_root, "ai-research-skills")
-        item(
-            f"{host.ownership_root}/ai-research-skills/scripts/rs_validate.py",
-            os.path.isfile(os.path.join(support, "scripts", "rs_validate.py")),
-        )
+        for name in sorted(os.listdir(SRC_SCRIPTS)):
+            if not os.path.isfile(os.path.join(SRC_SCRIPTS, name)):
+                continue
+            item(
+                f"{host.ownership_root}/ai-research-skills/scripts/{name}",
+                os.path.isfile(os.path.join(support, "scripts", name)),
+            )
         for name in SCHEMAS:
             item(
                 f"{host.ownership_root}/ai-research-skills/schemas/{name}",
                 os.path.isfile(os.path.join(support, "schemas", name)),
             )
-
         if host.hooks:
-            print(f"\n{host.id} — {host.hooks_file} hooks")
-            settings_path = os.path.join(root, host.ownership_root, host.hooks_file)
-            settings = read_settings_quiet(settings_path)
-            if settings is None:
-                item(f"{host.ownership_root}/{host.hooks_file} is valid JSON", False)
-                settings = {}
-            hooks_cfg = settings.get("hooks") if host.hooks_nested else settings
-            if not isinstance(hooks_cfg, dict):
-                hooks_cfg = {}
-            for claude_event, _matcher, script, _timeout, _conditions in HOOK_SPEC:
-                event = host.event_names.get(claude_event, claude_event)
-                item(f"{event}: {script}", settings_has_hook(hooks_cfg, event, script))
-        elif host.caveat:
-            print(f"\n  note: {host.caveat}")
+            config_relative = os.path.join(host.ownership_root, host.hooks_file)
+            try:
+                config_path = _safe_path(root, config_relative)
+                settings = read_settings_quiet(config_path)
+                config_detail = ""
+            except InstallerError as exc:
+                settings = None
+                config_detail = str(exc)
+            item(
+                f"{host.ownership_root}/{host.hooks_file} is valid JSON and not a symlink",
+                settings is not None,
+                config_detail,
+            )
+            if settings is not None:
+                shape_errors = hook_adapters.validate_config(settings, host, root)
+                item(
+                    "host adapter root/event/handler/matcher shape",
+                    not shape_errors,
+                    "; ".join(shape_errors),
+                )
+                handler_error = ""
+                try:
+                    _check_handlers(settings, host, record, root=root)
+                except InstallerError as exc:
+                    handler_error = str(exc)
+                item(
+                    "manifest-owned handler fingerprints", not handler_error, handler_error
+                )
+            validator_ok = isinstance(record, dict) and _verify_installed_validator(
+                root, host
+            )
+            item(
+                "installed validator matches trusted package and self-test",
+                validator_ok,
+            )
+            if host.id == "pi":
+                print(
+                    "  note  configured-but-inactive/degraded: Pi extension load "
+                    "cannot be confirmed"
+                )
+            else:
+                omitted = hook_adapters.for_host(host).omitted_events()
+                if omitted:
+                    print(
+                        "  note  degraded: unsupported events omitted ("
+                        + ", ".join(omitted)
+                        + ")"
+                    )
+                else:
+                    print("  note  configured; runtime dispatch is host responsibility")
+        if record is not None:
+            expected_files = record.get("files", {}) if isinstance(record, dict) else {}
+            for relative, digest in expected_files.items():
+                try:
+                    target = _safe_path(root, relative)
+                    actual = (
+                        _sha256(_read_bytes(target) or b"")
+                        if os.path.isfile(target)
+                        else None
+                    )
+                    item(f"manifest hash {relative}", actual == digest)
+                except InstallerError as exc:
+                    item(f"manifest path {relative}", False, str(exc))
         print()
 
     print("search backends")
-    if os.environ.get("OPENALEX_API_KEY"):
-        print("  ok   OPENALEX_API_KEY is set")
-    else:
-        print("  warn OPENALEX_API_KEY is not set — openalex needs it (see docs/SETUP.md)")
-    print("  hint run `claude mcp list` to check that the search backends are connected")
-
+    print(
+        "  hint  run the host's MCP/backend diagnostic separately; this check does not "
+        "infer runtime activity"
+    )
     if not any_installed:
-        print("\nnot installed for any host here")
+        print("\nnot installed for any selected host")
         return 1
-    print(f"\n{missing} item(s) missing" if missing else "\nall checks passed")
-    return 1 if missing else 0
+    print(f"\n{failures} item(s) missing" if failures else "\nall checks passed")
+    return 1 if failures else 0
 
 
 def legacy_main(argv: list[str]) -> int:
-    """The pre-packaging interface kept alive by the repo-root install.py shim.
-
-    python3 install.py [project-root]     # default: current directory
-    python3 install.py --uninstall [project-root]
-    """
     ap = argparse.ArgumentParser(
-        description="Install ai-research-skills into a project's .claude/ directory."
+        description="Install ai-research-skills safely into a project"
     )
+    ap.add_argument("root", nargs="?", default=".", help="target project root")
     ap.add_argument(
-        "root", nargs="?", default=".", help="target project root (default: cwd)"
+        "--uninstall", action="store_true", help="remove only manifest-owned suite files"
     )
-    ap.add_argument(
-        "--uninstall", action="store_true", help="remove the suite from the project"
-    )
+    ap.add_argument("--host", metavar="IDS", help="comma-separated host ids")
     args = ap.parse_args(argv)
-
     root = os.path.abspath(args.root)
-    if args.uninstall:
-        return uninstall(root)
-    return install(root)
+    return uninstall(root, args.host) if args.uninstall else install(root, args.host)

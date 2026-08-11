@@ -35,8 +35,48 @@ fmt:
 types:
     uv run --group dev basedpyright
 
+# Parse every shipped/configured JSON and YAML file, matching the CI lint job.
+data:
+    #!/usr/bin/env -S uv run --group dev python
+    import json, pathlib, sys, yaml
+    bad = []
+    skip = {".git", ".venv", "node_modules", "__pycache__", ".claude", "dist"}
+    for pattern, load in (("*.json", json.loads), ("*.yml", yaml.safe_load),
+                          ("*.yaml", yaml.safe_load)):
+        for path in pathlib.Path(".").rglob(pattern):
+            if skip & set(path.parts):
+                continue
+            try:
+                load(path.read_text())
+            except Exception as exc:
+                bad.append(f"{path}: {exc}")
+    print("\n".join(bad) if bad else "json/yaml parse: ok")
+    sys.exit(1 if bad else 0)
+
+# Validate the frontmatter contract consumed by host skill listings.
+skills:
+    #!/usr/bin/env -S uv run --group dev python
+    import pathlib, re, sys, yaml
+    bad = []
+    paths = sorted(pathlib.Path("src/ai_research_skills/assets/skills").glob("*/SKILL.md"))
+    for path in paths:
+        match = re.match(r"^---\n(.*?)\n---", path.read_text(), re.S)
+        if not match:
+            bad.append(f"{path}: no frontmatter")
+            continue
+        frontmatter = yaml.safe_load(match.group(1))
+        if not frontmatter.get("name"):
+            bad.append(f"{path}: no name")
+        if not frontmatter.get("description"):
+            bad.append(f"{path}: no description")
+        length = len(" ".join(str(frontmatter.get("description", "")).split()))
+        if length > 1536:
+            bad.append(f"{path}: description {length} chars, over the 1536 cap")
+    print("\n".join(bad) if bad else f"skill frontmatter: ok ({len(paths)} skills)")
+    sys.exit(1 if bad else 0)
+
 # What CI runs. Green here means green there.
-check: lint types test test-bare links
+check: lint types data skills test test-bare links
 
 # Relative links break on a file move, and skills get installed where repo paths do not exist
 links:

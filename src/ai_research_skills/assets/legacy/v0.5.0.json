@@ -1,0 +1,183 @@
+{
+  "format": 1,
+  "hosts": {
+    "claude": {
+      "files": {
+        ".claude/ai-research-skills/schemas/corpus.schema.json": "965661b68462bfd0c1f0f39afd14ed6f57e3b73d60b4c9b32e2e06e7c499ff2b",
+        ".claude/ai-research-skills/schemas/coverage.schema.json": "5ea56f488b06f6813091d2b31bbf8e2809145bb8479a26a999ad2e2652952bae",
+        ".claude/ai-research-skills/schemas/gaps.schema.json": "4e47e254bec01db8ebc3cb1e636ce82ed6e072a8b14ff39eed8382581209824c",
+        ".claude/ai-research-skills/schemas/protocol.schema.json": "7c7ce66a3fe3cd730930a8511bee9fa41648bfeae3d4c09737300414ca266f7f",
+        ".claude/ai-research-skills/scripts/rs_validate.py": "e07c70d4464c1c5283b475d0472ffd4b287a3f5cd75d489dd6d0939ab9edac87",
+        ".claude/commands/ars-audit.md": "93203ae9ebd8df1e9987dffd0c57ed610c75b019e875c2b4cd1c932d75dc70e3",
+        ".claude/commands/ars-brief.md": "fd172b49872d9f956494f49aa9abda9d647b62772489fa0a97d14a49861bd77d",
+        ".claude/commands/ars-gate.md": "23c318df9258752aa972831e19a904bbdbf0fdea006bf53a2bfb5db700e2d60b",
+        ".claude/commands/ars-help.md": "26441a532c0bc0a4c483dcc10468f39b87d4021a5da317d2e27235071872a6af",
+        ".claude/commands/ars-relwork.md": "ef01b5b811e70c58fe4219e8b14cf1219c03a281dc1ed4ba6f82d6b51ebf62c5",
+        ".claude/commands/ars-survey.md": "39830a14954f30d393d8124ad70d003199b326be26b8584edd57c2eb7d0d1139",
+        ".claude/commands/ars-watch.md": "72de12c24cead1cd34389e1ecd533c9243cf39a6bb17b453647e0bcb69c049d2",
+        ".claude/hooks/_payload.py": "b840204dbfdd14f6bcf503d0db8005692e12861def9a26905335df9e19234bfc",
+        ".claude/hooks/absence_claim_guard.py": "2df758af9edfb0b40ded4869c15d03a658fbdff104c42427ecd97099e2b43a54",
+        ".claude/hooks/bib_provenance_guard.py": "329084b2af98ca7f8eb9d0200b041c72652e0d1f564844c3863a87d25a710a32",
+        ".claude/hooks/stop_survey_peer.py": "b77334f55b9f9b68e77fcbb2c61315d58ba7520a7e41e21eb25580def6f0f62b",
+        ".claude/hooks/survey_staleness.py": "1c9e8a0587fad7e8c7efa7b4f7cd8d2ba3702bb90149480e3dbcfd537f4aacd3",
+        ".claude/skills/ars-decision-brief/SKILL.md": "b9e41c88d0bcaf63f7d1a9e64bb54f2605e4a9dea61182cde9d7ff3fef44fa39",
+        ".claude/skills/ars-gap-gate/SKILL.md": "28f60fd5a22815dc2df54fe04ff2ca69f9e27632519a1423a1cf1bfc777c8096",
+        ".claude/skills/ars-red-team/SKILL.md": "76b85b4ebbd87d86313d345195cbafddab0820a62057b0bb0a6b4d95eab9cdcd",
+        ".claude/skills/ars-related-work/SKILL.md": "10e0b3a6d99d773e5f93476166bbb420a31163a9012ebf4613a765710d9a5286",
+        ".claude/skills/ars-survey/SKILL.md": "7c4b2888b4a3e2f6b2bafd1cd5ad9189a2a295b6532f4dc6d03ecd328fc6e85d",
+        ".claude/skills/ars-survey/references/00-scope.md": "2c2596247ad9f0b8f077eb952aa1a4071efaa8ba167e35b480690170a6cc8fd2",
+        ".claude/skills/ars-survey/references/01-recall.md": "33f1b10616eb11601e4a174da2c2cd3ea0ac558beb97cad31252d5ae22fd72e3",
+        ".claude/skills/ars-survey/references/02-score.md": "65b55a0aed512dacc7885aba129af4833ec9123fe0194563aeebb6b383deb6bf",
+        ".claude/skills/ars-survey/references/03-extract.md": "219a31d5e589c0833a92831087d6083ecd56090d5640480bc86dbb7ff4dc092f",
+        ".claude/skills/ars-survey/references/04-map.md": "64634678a4400a55638d9698e4f13a10d7e894fbe13ed6c60b159a8d02f748bb",
+        ".claude/skills/ars-survey/references/05-saturate.md": "9b4020e8715b4efdd5712c6428cec0feb55a61f95625c82601759288eac27c68",
+        ".claude/skills/ars-verify/SKILL.md": "b2ad83f2944e63f75e3352bc706707d2b0467107f0b6a0c71be52e9447eeb7f6",
+        ".claude/skills/ars-watch/SKILL.md": "0b1046d81e558e8026dd872f937cd66ce4ed1d2efac9879659399e76c6758831"
+      },
+      "handler_commands": [
+        "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/bib_provenance_guard.py\"",
+        "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/bib_provenance_guard.py\"",
+        "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/absence_claim_guard.py\"",
+        "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/absence_claim_guard.py\"",
+        "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/absence_claim_guard.py\"",
+        "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/absence_claim_guard.py\"",
+        "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/absence_claim_guard.py\"",
+        "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/absence_claim_guard.py\"",
+        "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/absence_claim_guard.py\"",
+        "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/absence_claim_guard.py\"",
+        "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/survey_staleness.py\"",
+        "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/stop_survey_peer.py\""
+      ]
+    },
+    "codex": {
+      "files": {
+        ".codex/ai-research-skills/schemas/corpus.schema.json": "965661b68462bfd0c1f0f39afd14ed6f57e3b73d60b4c9b32e2e06e7c499ff2b",
+        ".codex/ai-research-skills/schemas/coverage.schema.json": "5ea56f488b06f6813091d2b31bbf8e2809145bb8479a26a999ad2e2652952bae",
+        ".codex/ai-research-skills/schemas/gaps.schema.json": "4e47e254bec01db8ebc3cb1e636ce82ed6e072a8b14ff39eed8382581209824c",
+        ".codex/ai-research-skills/schemas/protocol.schema.json": "7c7ce66a3fe3cd730930a8511bee9fa41648bfeae3d4c09737300414ca266f7f",
+        ".codex/ai-research-skills/scripts/rs_validate.py": "e07c70d4464c1c5283b475d0472ffd4b287a3f5cd75d489dd6d0939ab9edac87",
+        ".codex/hooks/_payload.py": "b840204dbfdd14f6bcf503d0db8005692e12861def9a26905335df9e19234bfc",
+        ".codex/hooks/absence_claim_guard.py": "2df758af9edfb0b40ded4869c15d03a658fbdff104c42427ecd97099e2b43a54",
+        ".codex/hooks/bib_provenance_guard.py": "329084b2af98ca7f8eb9d0200b041c72652e0d1f564844c3863a87d25a710a32",
+        ".codex/hooks/stop_survey_peer.py": "b77334f55b9f9b68e77fcbb2c61315d58ba7520a7e41e21eb25580def6f0f62b",
+        ".codex/hooks/survey_staleness.py": "1c9e8a0587fad7e8c7efa7b4f7cd8d2ba3702bb90149480e3dbcfd537f4aacd3",
+        ".codex/skills/ars-decision-brief/SKILL.md": "b9e41c88d0bcaf63f7d1a9e64bb54f2605e4a9dea61182cde9d7ff3fef44fa39",
+        ".codex/skills/ars-gap-gate/SKILL.md": "28f60fd5a22815dc2df54fe04ff2ca69f9e27632519a1423a1cf1bfc777c8096",
+        ".codex/skills/ars-red-team/SKILL.md": "76b85b4ebbd87d86313d345195cbafddab0820a62057b0bb0a6b4d95eab9cdcd",
+        ".codex/skills/ars-related-work/SKILL.md": "10e0b3a6d99d773e5f93476166bbb420a31163a9012ebf4613a765710d9a5286",
+        ".codex/skills/ars-survey/SKILL.md": "c634a534d264736f28ae72a9574aa992af6d8d61a7bf3a647a1ea9f46986432d",
+        ".codex/skills/ars-survey/references/00-scope.md": "5c77862654361dd7af8f9d18f20a8ffd59fd8215d39492fc8a5cc6349f557544",
+        ".codex/skills/ars-survey/references/01-recall.md": "33f1b10616eb11601e4a174da2c2cd3ea0ac558beb97cad31252d5ae22fd72e3",
+        ".codex/skills/ars-survey/references/02-score.md": "65b55a0aed512dacc7885aba129af4833ec9123fe0194563aeebb6b383deb6bf",
+        ".codex/skills/ars-survey/references/03-extract.md": "219a31d5e589c0833a92831087d6083ecd56090d5640480bc86dbb7ff4dc092f",
+        ".codex/skills/ars-survey/references/04-map.md": "64634678a4400a55638d9698e4f13a10d7e894fbe13ed6c60b159a8d02f748bb",
+        ".codex/skills/ars-survey/references/05-saturate.md": "8f2fd82a43b2595fdb4c43ac8b4096f41b3d7f693cd5e96f7b4437d9984d2f6f",
+        ".codex/skills/ars-verify/SKILL.md": "b2ad83f2944e63f75e3352bc706707d2b0467107f0b6a0c71be52e9447eeb7f6",
+        ".codex/skills/ars-watch/SKILL.md": "0b1046d81e558e8026dd872f937cd66ce4ed1d2efac9879659399e76c6758831"
+      },
+      "handler_commands": [
+        "python3 \".codex/hooks/bib_provenance_guard.py\"",
+        "python3 \".codex/hooks/absence_claim_guard.py\"",
+        "python3 \".codex/hooks/survey_staleness.py\"",
+        "python3 \".codex/hooks/stop_survey_peer.py\""
+      ]
+    },
+    "cursor": {
+      "files": {
+        ".cursor/ai-research-skills/schemas/corpus.schema.json": "965661b68462bfd0c1f0f39afd14ed6f57e3b73d60b4c9b32e2e06e7c499ff2b",
+        ".cursor/ai-research-skills/schemas/coverage.schema.json": "5ea56f488b06f6813091d2b31bbf8e2809145bb8479a26a999ad2e2652952bae",
+        ".cursor/ai-research-skills/schemas/gaps.schema.json": "4e47e254bec01db8ebc3cb1e636ce82ed6e072a8b14ff39eed8382581209824c",
+        ".cursor/ai-research-skills/schemas/protocol.schema.json": "7c7ce66a3fe3cd730930a8511bee9fa41648bfeae3d4c09737300414ca266f7f",
+        ".cursor/ai-research-skills/scripts/rs_validate.py": "e07c70d4464c1c5283b475d0472ffd4b287a3f5cd75d489dd6d0939ab9edac87",
+        ".cursor/hooks/_payload.py": "b840204dbfdd14f6bcf503d0db8005692e12861def9a26905335df9e19234bfc",
+        ".cursor/hooks/absence_claim_guard.py": "2df758af9edfb0b40ded4869c15d03a658fbdff104c42427ecd97099e2b43a54",
+        ".cursor/hooks/bib_provenance_guard.py": "329084b2af98ca7f8eb9d0200b041c72652e0d1f564844c3863a87d25a710a32",
+        ".cursor/hooks/stop_survey_peer.py": "b77334f55b9f9b68e77fcbb2c61315d58ba7520a7e41e21eb25580def6f0f62b",
+        ".cursor/hooks/survey_staleness.py": "1c9e8a0587fad7e8c7efa7b4f7cd8d2ba3702bb90149480e3dbcfd537f4aacd3",
+        ".cursor/skills/ars-decision-brief/SKILL.md": "b9e41c88d0bcaf63f7d1a9e64bb54f2605e4a9dea61182cde9d7ff3fef44fa39",
+        ".cursor/skills/ars-gap-gate/SKILL.md": "28f60fd5a22815dc2df54fe04ff2ca69f9e27632519a1423a1cf1bfc777c8096",
+        ".cursor/skills/ars-red-team/SKILL.md": "76b85b4ebbd87d86313d345195cbafddab0820a62057b0bb0a6b4d95eab9cdcd",
+        ".cursor/skills/ars-related-work/SKILL.md": "10e0b3a6d99d773e5f93476166bbb420a31163a9012ebf4613a765710d9a5286",
+        ".cursor/skills/ars-survey/SKILL.md": "34d6a92d62fc61146deaa632bbd0ae72833e21f82e1e36ff73e9f6937f4fb096",
+        ".cursor/skills/ars-survey/references/00-scope.md": "67fa49d121bd0851667176ecf2ea436e41fa7cb7c80c8c3dae5d3416955a7a90",
+        ".cursor/skills/ars-survey/references/01-recall.md": "33f1b10616eb11601e4a174da2c2cd3ea0ac558beb97cad31252d5ae22fd72e3",
+        ".cursor/skills/ars-survey/references/02-score.md": "65b55a0aed512dacc7885aba129af4833ec9123fe0194563aeebb6b383deb6bf",
+        ".cursor/skills/ars-survey/references/03-extract.md": "219a31d5e589c0833a92831087d6083ecd56090d5640480bc86dbb7ff4dc092f",
+        ".cursor/skills/ars-survey/references/04-map.md": "64634678a4400a55638d9698e4f13a10d7e894fbe13ed6c60b159a8d02f748bb",
+        ".cursor/skills/ars-survey/references/05-saturate.md": "228ff18b11464d650d79f96530b2145ed4e45c03c642e4cdb3e82a9f7e56908a",
+        ".cursor/skills/ars-verify/SKILL.md": "b2ad83f2944e63f75e3352bc706707d2b0467107f0b6a0c71be52e9447eeb7f6",
+        ".cursor/skills/ars-watch/SKILL.md": "0b1046d81e558e8026dd872f937cd66ce4ed1d2efac9879659399e76c6758831"
+      },
+      "handler_commands": [
+        "python3 \".cursor/hooks/bib_provenance_guard.py\"",
+        "python3 \".cursor/hooks/absence_claim_guard.py\"",
+        "python3 \".cursor/hooks/survey_staleness.py\"",
+        "python3 \".cursor/hooks/stop_survey_peer.py\""
+      ]
+    },
+    "kimi": {
+      "files": {
+        ".kimi/ai-research-skills/schemas/corpus.schema.json": "965661b68462bfd0c1f0f39afd14ed6f57e3b73d60b4c9b32e2e06e7c499ff2b",
+        ".kimi/ai-research-skills/schemas/coverage.schema.json": "5ea56f488b06f6813091d2b31bbf8e2809145bb8479a26a999ad2e2652952bae",
+        ".kimi/ai-research-skills/schemas/gaps.schema.json": "4e47e254bec01db8ebc3cb1e636ce82ed6e072a8b14ff39eed8382581209824c",
+        ".kimi/ai-research-skills/schemas/protocol.schema.json": "7c7ce66a3fe3cd730930a8511bee9fa41648bfeae3d4c09737300414ca266f7f",
+        ".kimi/ai-research-skills/scripts/rs_validate.py": "e07c70d4464c1c5283b475d0472ffd4b287a3f5cd75d489dd6d0939ab9edac87",
+        ".kimi/skills/ars-decision-brief/SKILL.md": "b9e41c88d0bcaf63f7d1a9e64bb54f2605e4a9dea61182cde9d7ff3fef44fa39",
+        ".kimi/skills/ars-gap-gate/SKILL.md": "28f60fd5a22815dc2df54fe04ff2ca69f9e27632519a1423a1cf1bfc777c8096",
+        ".kimi/skills/ars-red-team/SKILL.md": "76b85b4ebbd87d86313d345195cbafddab0820a62057b0bb0a6b4d95eab9cdcd",
+        ".kimi/skills/ars-related-work/SKILL.md": "10e0b3a6d99d773e5f93476166bbb420a31163a9012ebf4613a765710d9a5286",
+        ".kimi/skills/ars-survey/SKILL.md": "218e9b32cf4e256692bbfcc571e75042e5e5721e5e5b3389001f0ea3ebbd0215",
+        ".kimi/skills/ars-survey/references/00-scope.md": "33e33533423b8e806cec011a418c1289da38b113b8433ed7dfddfe6879191d07",
+        ".kimi/skills/ars-survey/references/01-recall.md": "33f1b10616eb11601e4a174da2c2cd3ea0ac558beb97cad31252d5ae22fd72e3",
+        ".kimi/skills/ars-survey/references/02-score.md": "65b55a0aed512dacc7885aba129af4833ec9123fe0194563aeebb6b383deb6bf",
+        ".kimi/skills/ars-survey/references/03-extract.md": "219a31d5e589c0833a92831087d6083ecd56090d5640480bc86dbb7ff4dc092f",
+        ".kimi/skills/ars-survey/references/04-map.md": "64634678a4400a55638d9698e4f13a10d7e894fbe13ed6c60b159a8d02f748bb",
+        ".kimi/skills/ars-survey/references/05-saturate.md": "96d49ff4bc3ec3f5cb6ebab0a36aee4744a35ef9f242ea01e9d29ad7357e6eec",
+        ".kimi/skills/ars-verify/SKILL.md": "b2ad83f2944e63f75e3352bc706707d2b0467107f0b6a0c71be52e9447eeb7f6",
+        ".kimi/skills/ars-watch/SKILL.md": "0b1046d81e558e8026dd872f937cd66ce4ed1d2efac9879659399e76c6758831"
+      },
+      "handler_commands": [
+        "python3 \".kimi/hooks/bib_provenance_guard.py\"",
+        "python3 \".kimi/hooks/absence_claim_guard.py\"",
+        "python3 \".kimi/hooks/survey_staleness.py\"",
+        "python3 \".kimi/hooks/stop_survey_peer.py\""
+      ]
+    },
+    "pi": {
+      "files": {
+        ".pi/ai-research-skills/schemas/corpus.schema.json": "965661b68462bfd0c1f0f39afd14ed6f57e3b73d60b4c9b32e2e06e7c499ff2b",
+        ".pi/ai-research-skills/schemas/coverage.schema.json": "5ea56f488b06f6813091d2b31bbf8e2809145bb8479a26a999ad2e2652952bae",
+        ".pi/ai-research-skills/schemas/gaps.schema.json": "4e47e254bec01db8ebc3cb1e636ce82ed6e072a8b14ff39eed8382581209824c",
+        ".pi/ai-research-skills/schemas/protocol.schema.json": "7c7ce66a3fe3cd730930a8511bee9fa41648bfeae3d4c09737300414ca266f7f",
+        ".pi/ai-research-skills/scripts/rs_validate.py": "e07c70d4464c1c5283b475d0472ffd4b287a3f5cd75d489dd6d0939ab9edac87",
+        ".pi/hooks/_payload.py": "b840204dbfdd14f6bcf503d0db8005692e12861def9a26905335df9e19234bfc",
+        ".pi/hooks/absence_claim_guard.py": "2df758af9edfb0b40ded4869c15d03a658fbdff104c42427ecd97099e2b43a54",
+        ".pi/hooks/bib_provenance_guard.py": "329084b2af98ca7f8eb9d0200b041c72652e0d1f564844c3863a87d25a710a32",
+        ".pi/hooks/stop_survey_peer.py": "b77334f55b9f9b68e77fcbb2c61315d58ba7520a7e41e21eb25580def6f0f62b",
+        ".pi/hooks/survey_staleness.py": "1c9e8a0587fad7e8c7efa7b4f7cd8d2ba3702bb90149480e3dbcfd537f4aacd3",
+        ".pi/skills/ars-decision-brief/SKILL.md": "b9e41c88d0bcaf63f7d1a9e64bb54f2605e4a9dea61182cde9d7ff3fef44fa39",
+        ".pi/skills/ars-gap-gate/SKILL.md": "28f60fd5a22815dc2df54fe04ff2ca69f9e27632519a1423a1cf1bfc777c8096",
+        ".pi/skills/ars-red-team/SKILL.md": "76b85b4ebbd87d86313d345195cbafddab0820a62057b0bb0a6b4d95eab9cdcd",
+        ".pi/skills/ars-related-work/SKILL.md": "10e0b3a6d99d773e5f93476166bbb420a31163a9012ebf4613a765710d9a5286",
+        ".pi/skills/ars-survey/SKILL.md": "dc6f17cbf04cd3a3d19a1ae1cd96015941f4fb6fb9c0136b04e883a600ce5f51",
+        ".pi/skills/ars-survey/references/00-scope.md": "9ead2bf415d1011155b1241f4e763b82fea0fa53e8c3d8ff6ebd8588235b7ea3",
+        ".pi/skills/ars-survey/references/01-recall.md": "33f1b10616eb11601e4a174da2c2cd3ea0ac558beb97cad31252d5ae22fd72e3",
+        ".pi/skills/ars-survey/references/02-score.md": "65b55a0aed512dacc7885aba129af4833ec9123fe0194563aeebb6b383deb6bf",
+        ".pi/skills/ars-survey/references/03-extract.md": "219a31d5e589c0833a92831087d6083ecd56090d5640480bc86dbb7ff4dc092f",
+        ".pi/skills/ars-survey/references/04-map.md": "64634678a4400a55638d9698e4f13a10d7e894fbe13ed6c60b159a8d02f748bb",
+        ".pi/skills/ars-survey/references/05-saturate.md": "b1a9d9b4736a34064e736e11f66742d53d3b7c01f3bdc3c60919e72963049620",
+        ".pi/skills/ars-verify/SKILL.md": "b2ad83f2944e63f75e3352bc706707d2b0467107f0b6a0c71be52e9447eeb7f6",
+        ".pi/skills/ars-watch/SKILL.md": "0b1046d81e558e8026dd872f937cd66ce4ed1d2efac9879659399e76c6758831"
+      },
+      "handler_commands": [
+        "python3 \".pi/hooks/bib_provenance_guard.py\"",
+        "python3 \".pi/hooks/absence_claim_guard.py\"",
+        "python3 \".pi/hooks/survey_staleness.py\"",
+        "python3 \".pi/hooks/stop_survey_peer.py\""
+      ]
+    }
+  },
+  "package": "ai-research-skills",
+  "source_commit": "6c21b53",
+  "version": "0.5.0"
+}

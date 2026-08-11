@@ -18,6 +18,8 @@ import os
 import re
 import sys
 
+import _payload
+
 ABSTRACT_SHARE_WARN = 0.5  # includes that are abstract-only
 COVERAGE_WARN = 0.9  # adjudicated / deduped
 SINGLE_MODE_WARN = 0.8  # share of includes from one recall mode
@@ -157,7 +159,7 @@ def main() -> None:
     msg = "ai-research-skills — what this survey rests on:\n" + "\n".join(
         f"  · {f}" for f in findings
     )
-    json.dump({"systemMessage": msg, "suppressOutput": True}, sys.stdout)
+    json.dump(_payload.stop_warning(msg), sys.stdout)
 
 
 if __name__ == "__main__":

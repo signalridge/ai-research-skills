@@ -17,12 +17,13 @@ OpenCode is the one worth revisiting: it does have a blocking pre-tool hook
 Python guards rather than a config file.
 
 The honest part is `hooks`. Skills are portable — a SKILL.md body is the same text
-everywhere. The four guardrails are not: they need a host that fires an event *before*
-a file is written, with the path in the payload. Claude Code has that. Cursor's hook set
-(beforeSubmitPrompt / stop / sessionEnd) has no file-write event at all, so the two
-guards that matter most have nowhere to attach. A host that silently installs the
-methodology without the enforcement leaves the user believing they are protected, which
-is worse than not installing — so `hooks` is recorded per host and reported at install.
+everywhere. The four guardrails are not: they need a host that fires an event with the
+path in the payload. Claude and Codex have grouped pre-tool surfaces; Cursor has native
+pre-tool and stop events, but its stop response is a follow-up request rather than a safe
+advisory channel, so this package omits that event; Pi depends on an extension whose
+runtime this installer cannot confirm. A host that silently installs an unverified
+methodology leaves the user believing they are protected, so adapters report configured
+versus degraded rather than claiming active runtime enforcement.
 """
 
 from __future__ import annotations
@@ -48,7 +49,8 @@ class Host:
 
     hooks_file: str = "settings.json"
     """Where the host reads hook config from, relative to ownership_root. Claude Code
-    nests them under a `hooks` key in settings.json; Codex reads a bare hooks.json."""
+    nests them under a `hooks` key in settings.json; Codex reads hooks.json with its own
+    top-level `hooks` object."""
 
     hooks_nested: bool = True
     """True when the config wraps the events in a top-level `hooks` object."""
@@ -87,18 +89,11 @@ NO_GUARDS = (
     "by name before trusting a draft."
 )
 
-# Why the other nine hosts get no hook config, rather than one written on a guess:
-#
-# Claude Code and Codex were both checked and both work — same event names, same
-# hookSpecificOutput deny schema, only the config file and write payload differ.
-# Cursor was checked and does not: its hook set is beforeSubmitPrompt / stop /
-# sessionEnd, none of which carry a file path, so there is nothing to attach to.
-#
-# The rest are unchecked. host distribution reference is not the reference here — it installs skills across
-# ten hosts and deliberately installs no agent hooks at all, so there is nothing in it
-# to copy on this point. Writing a config from a guess is worse than writing none: a
-# wrong one can break a working agent setup, and a config that parses but never fires
-# leaves the user believing the guards are running.
+# Hook shape is kept in hook_adapters rather than guessed here. Claude/Codex use grouped
+# handlers, Cursor uses direct definitions and only its pre-tool deny surface is safe to
+# claim, and Pi's extension runtime remains configured-but-unconfirmed. Writing a config
+# that parses but never fires leaves the user believing the guards are running, so doctor
+# validates the actual tree and reports the remaining runtime caveat.
 
 HOSTS: tuple[Host, ...] = (
     Host(
@@ -123,7 +118,10 @@ HOSTS: tuple[Host, ...] = (
         # patch body rather than a file_path. hooks/_payload.py reads both shapes.
         hooks=True,
         hooks_file="hooks.json",
-        hooks_nested=False,
+        # Codex's official project shape is {"hooks": {"PreToolUse": [...]}}.
+        # The nested hook groups are handled by hook_adapters; never emit events at
+        # the JSON root.
+        hooks_nested=True,
         # Codex writes through apply_patch, so Write(...)/Edit(...) conditions would
         # never match and would turn the guards off without saying so. Whether Codex
         # accepts Claude's permission-rule condition syntax at all is unverified, so
@@ -136,15 +134,12 @@ HOSTS: tuple[Host, ...] = (
         skills_dir=".cursor/skills",
         ownership_root=".cursor",
         detect_paths=(".cursor",),
-        # Cursor does have preToolUse/postToolUse; an earlier reading of this machine's
-        # ~/.cursor/hooks.json saw only the three events that happened to be configured
-        # there and wrongly concluded the host had no file-write event.
-        #
-        # Three differences from Claude Code, each of which fails silently if missed:
-        # event names are camelCase, a project hooks.json without `version` loads none
-        # of its hooks, and the deny decision is read from a flat {permission,
-        # user_message} rather than hookSpecificOutput. hooks/_payload.py emits both
-        # dialects, so the guards need no per-host branch.
+        # Cursor's native project hook file uses camelCase event names and direct
+        # {command, matcher?, timeout?} definitions.  Its stop event accepts a
+        # follow-up request, not a non-looping advisory, so stop_survey_peer is omitted
+        # deliberately; install reports that degradation.  Absence denial moves to
+        # preToolUse.  Keep these layout facts in the adapter rather than making
+        # installer code guess from a Claude-shaped group.
         hooks=True,
         hooks_file="hooks.json",
         hooks_nested=True,
