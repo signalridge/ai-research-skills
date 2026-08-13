@@ -22,7 +22,7 @@ recall_modes:
   keyword:
     - {tool: arxiv.search_papers, query: 'ti:"multi-hop" AND abs:"retrieval augmented"', categories: [cs.CL], max_results: 50}
   citation_chain:
-    - {tool: openalex.get_citation_graph, seed_id: W2626778328, direction: cites, per_page: 100}
+    - {tool: openalex.get_citation_graph, seed_id: W0000000000, direction: cites, per_page: 100}
   venue_author:
     - {tool: openalex.search_entities, entity_type: works, query: retrieval, filters: {publication_year: "2025-2026"}, per_page: 100}
   contrarian:

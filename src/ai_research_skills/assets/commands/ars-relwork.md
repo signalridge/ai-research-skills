@@ -1,19 +1,11 @@
 ---
-description: Draft a related-work section from a completed survey
-argument-hint: "[survey slug]"
+disable-model-invocation: true
 ---
+# /ars-relwork
 
-Run the `ars-related-work` skill for: **$ARGUMENTS**
+Run this user-invoked command to draft related work from the sources, files, searches, or optional workspace you name. Ask for
+a search if you want new sources. Organise by the distinctions that matter, cite each factual
+claim, preserve disagreement, and state what the evidence depth cannot support.
 
-Requires a completed survey with `corpus.jsonl` includes carrying `claim` and
-`evidence_read`, plus an attested `refs.bib` whose entries bind key/id/tool/date. This is a
-read-only projection; identifier gaps go back to `/ars-survey`.
-
-**Never search here.** A missing paper goes back to `/ars-survey`.
-
-Organise by taxonomy axis, never one paragraph per paper. Check `evidence_read` before
-characterising any paper — an `abstract` record supports what a paper addresses, never what
-it showed.
-
-Report the `evidence_read` distribution alongside the draft. That is the section's real
-quality signal.
+Write to a requested path only after confirming it. Compile LaTeX, read its log, and fix actual
+errors when the requested output is LaTeX.

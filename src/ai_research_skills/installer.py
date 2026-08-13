@@ -1,8 +1,8 @@
-"""Safe, stdlib-only installer for ai-research-skills.
+"""Safe, stdlib-only installer for the standalone research toolbox.
 
-The installer owns individual suite files and individual hook handlers, never an entire
-host configuration.  Every install/uninstall performs a complete preflight first, then
-uses same-directory tempfile+fsync+replace writes inside a small rollback transaction.
+The installer owns individual ordinary suite files, never an entire host configuration.
+Fresh operations install no runtime hooks. Legacy hook handlers/files are recognized only
+for exact, transactional cleanup during upgrade, doctor, or uninstall.
 """
 
 from __future__ import annotations
@@ -16,7 +16,6 @@ import hashlib
 import json
 import os
 import stat
-import subprocess
 import sys
 import tempfile
 from collections import Counter
@@ -49,9 +48,11 @@ COMMANDS = (
     "ars-brief.md",
     "ars-gate.md",
     "ars-help.md",
+    "ars-lint.md",
     "ars-relwork.md",
     "ars-survey.md",
     "ars-watch.md",
+    "ars-verify.md",
 )
 HOOK_SCRIPTS = (
     "_payload.py",
@@ -59,6 +60,15 @@ HOOK_SCRIPTS = (
     "bib_provenance_guard.py",
     "stop_survey_peer.py",
     "survey_staleness.py",
+)
+
+_PAYLOAD_DEPENDENT_HANDLERS = frozenset(
+    {
+        "absence_claim_guard.py",
+        "bib_provenance_guard.py",
+        "stop_survey_peer.py",
+        "survey_staleness.py",
+    }
 )
 SCHEMAS = (
     "corpus.schema.json",
@@ -72,45 +82,23 @@ SCHEMAS = (
 LEGACY_SKILLS = tuple(name.removeprefix("a") for name in SKILLS)
 LEGACY_COMMANDS = tuple(name.removeprefix("a") for name in COMMANDS)
 
-BIB_SUFFIXES = (".bib",)
-PROSE_SUFFIXES = (".md", ".tex", ".markdown", ".mdx")
-
-# Compatibility description of the Claude filters.  The central adapter uses these
-# only for Claude; Cursor receives direct native definitions without an `if` field.
-HOOK_SPEC = (
-    (
-        "PreToolUse",
-        "Edit|Write",
-        "bib_provenance_guard.py",
-        10,
-        tuple(
-            f"{tool}(*{suffix})" for suffix in BIB_SUFFIXES for tool in ("Write", "Edit")
-        ),
-    ),
-    (
-        "PostToolUse",
-        "Edit|Write",
-        "absence_claim_guard.py",
-        10,
-        tuple(
-            f"{tool}(*{suffix})" for suffix in PROSE_SUFFIXES for tool in ("Write", "Edit")
-        ),
-    ),
-    ("SessionStart", None, "survey_staleness.py", 10, ()),
-    ("Stop", None, "stop_survey_peer.py", 15, ()),
-)
+# Kept as an empty compatibility constant.  Version 0.8 has no desired hook handlers;
+# old handlers are recognized only by hook_adapters during upgrade/doctor cleanup.
+HOOK_SPEC: tuple[object, ...] = ()
 
 ASSETS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
 SRC_SKILLS = os.path.join(ASSETS, "skills")
 SRC_COMMANDS = os.path.join(ASSETS, "commands")
-SRC_HOOKS = os.path.join(ASSETS, "hooks")
 SRC_SCRIPTS = os.path.join(ASSETS, "scripts")
 SRC_SCHEMAS = os.path.join(ASSETS, "schemas")
-VALIDATOR_RUNTIME_ASSETS = ("rs_validate.py", "_yaml_subset.py", "_schema_subset.py")
 MANIFEST_REL = ".ai-research-skills/manifest.json"
 JOURNAL_REL = ".ai-research-skills/transaction.json"
 LEGACY_FINGERPRINT_REL = os.path.join("legacy", "v0.5.0.json")
-MANIFEST_FORMAT = 1
+# Format 1 was emitted by the pre-0.8 installer.  Keep accepting it long enough to
+# migrate package-owned state, but never emit it again: an older installer treats format 1
+# as a live hook-enabled manifest and can reinstall governance handlers during downgrade.
+LEGACY_MANIFEST_FORMAT = 1
+MANIFEST_FORMAT = 2
 JOURNAL_FORMAT = 1
 
 CLAUDE_ROOT = ".claude"
@@ -118,12 +106,8 @@ CLAUDE_PROJECT_DIR = "$CLAUDE_PROJECT_DIR/"
 
 
 def _installed_hook_scripts(host: hosts.Host) -> tuple[str, ...]:
-    if not host.hooks:
-        return ()
-    adapter = hook_adapters.for_host(host)
-    names = {"_payload.py"}
-    names.update(script for _event, _matcher, script, _timeout in adapter.specs())
-    return tuple(name for name in HOOK_SCRIPTS if name in names)
+    """Return no desired hooks; the name remains for legacy callers."""
+    return ()
 
 
 class InstallerError(RuntimeError):
@@ -445,12 +429,6 @@ def _desired_files(root: str, host: hosts.Host) -> dict[str, bytes]:
                 os.path.join(SRC_COMMANDS, name),
                 True,
             )
-    if host.hooks:
-        for name in _installed_hook_scripts(host):
-            add_file(
-                os.path.join(host.ownership_root, "hooks", name),
-                os.path.join(SRC_HOOKS, name),
-            )
     for source in _source_files(SRC_SCRIPTS):
         add_file(
             os.path.join(
@@ -492,7 +470,10 @@ def _read_manifest(root: str) -> dict[str, Any] | None:
             ".ai-research-skills/manifest.json was modified or has an invalid "
             "integrity seal"
         )
-    if data.get("format") != MANIFEST_FORMAT or data.get("package") != "ai-research-skills":
+    if (
+        data.get("format") not in {LEGACY_MANIFEST_FORMAT, MANIFEST_FORMAT}
+        or data.get("package") != "ai-research-skills"
+    ):
         raise InstallerError("manifest format/package is not owned by this installer")
     if not isinstance(data.get("hosts"), dict):
         raise InstallerError("manifest hosts is not an object")
@@ -558,16 +539,18 @@ def remove_legacy(root: str, host: hosts.Host) -> list[str]:
 def _manifest_host_record(
     root: str, host: hosts.Host, desired: dict[str, bytes], settings: dict[str, Any]
 ) -> dict[str, Any]:
+    """Record only files installed by the standalone 0.8 toolbox.
+
+    Hook configuration is deliberately absent from new manifests.  ``settings`` remains
+    in the signature for callers from older versions, but it is never inspected or
+    written into a fresh manifest.
+    """
     files = {_relative(root, path): _sha256(data) for path, data in sorted(desired.items())}
-    adapter = hook_adapters.for_host(host)
-    config = os.path.join(host.ownership_root, host.hooks_file) if host.hooks else None
     return {
         "files": files,
-        "config": config.replace(os.sep, "/") if config else None,
-        "handlers": (
-            hook_adapters.handler_records(settings, host, root) if host.hooks else []
-        ),
-        "adapter": adapter.style,
+        "config": None,
+        "handlers": [],
+        "adapter": "none",
     }
 
 
@@ -595,27 +578,22 @@ def _check_handlers(
     root: str | None = None,
     uninstall: bool = False,
 ) -> list[str]:
-    if not host.hooks or record is None:
+    """Report old modified handlers without blocking the standalone upgrade.
+
+    Hook handlers are obsolete package state.  Exact manifest definitions may be removed;
+    a recognizable ARS command with any user edit is retained and reported instead of
+    being overwritten or silently deleted.
+    """
+    if record is None:
         return []
-    actual = hook_adapters.handler_records(settings, host, root)
-    expected = _record_handlers(record)
-    modified: list[str] = []
-    # Missing handlers are safe to repair/remove.  Every command-shaped handler for a
-    # managed script that is present must, however, be an exact manifest definition.
-    for item in actual:
-        wanted = [
-            candidate
-            for candidate in expected
-            if candidate.get("script") == item.get("script")
-        ]
-        if wanted and not any(_handler_equal(item, candidate) for candidate in wanted):
-            modified.append(str(item.get("script", "handler")))
-    if modified and not uninstall:
-        raise InstallerError(
-            f"managed {host.id} hook handler was modified; refusing mutation: "
-            + ", ".join(sorted(set(modified)))
-        )
-    return sorted(set(modified))
+    _cleaned, _removed, modified = hook_adapters.cleanup(
+        settings,
+        host,
+        root=root,
+        owned_records=_record_handlers(record),
+        allow_legacy=False,
+    )
+    return modified
 
 
 def _manifest_digest_for(manifest: dict[str, Any] | None, relative: str) -> str | None:
@@ -664,14 +642,102 @@ def _preflight_file_conflicts(
         raise InstallerError(f"same-name unknown/conflicting file: {relative}")
 
 
+def _is_obsolete_hook_path(host: hosts.Host, relative: str) -> bool:
+    normalized = relative.replace("\\", "/")
+    prefix = f"{host.ownership_root}/hooks/"
+    return normalized.startswith(prefix) and normalized.rsplit("/", 1)[-1] in HOOK_SCRIPTS
+
+
+def _modified_handler_paths(
+    root: str,
+    host: hosts.Host,
+    modified_handlers: Iterable[str],
+    *,
+    owned_relatives: Iterable[str] = (),
+) -> set[str]:
+    """Return legacy scripts and owned shared dependencies kept with retained handlers."""
+    modified = {script for script in modified_handlers if script in HOOK_SCRIPTS}
+    protected = {
+        _safe_path(root, os.path.join(host.ownership_root, "hooks", script))
+        for script in modified
+    }
+    owned = {
+        relative.replace("\\", "/")
+        for relative in owned_relatives
+        if isinstance(relative, str)
+    }
+    payload_relative = os.path.join(host.ownership_root, "hooks", "_payload.py").replace(
+        os.sep, "/"
+    )
+    if modified & _PAYLOAD_DEPENDENT_HANDLERS and payload_relative in owned:
+        protected.add(_safe_path(root, payload_relative))
+    return protected
+
+
+def _legacy_metadata_record(  # noqa: PLR0913, PLR0917
+    root: str,
+    host: hosts.Host,
+    base: dict[str, Any],
+    old_record: dict[str, Any] | None,
+    settings: dict[str, Any],
+    config_path: str | None,
+    legacy_hashes: dict[str, str],
+    modified_files: list[str],
+    modified_handlers: list[str],
+    protected_paths: set[str],
+) -> dict[str, Any]:
+    """Carry proven modified legacy state so later cleanup remains safe."""
+    if not modified_handlers and not any(
+        _is_obsolete_hook_path(host, relative) for relative in modified_files
+    ):
+        return base
+    result = copy.deepcopy(base)
+    if config_path is not None:
+        result["config"] = _relative(root, config_path)
+    records = _record_handlers(old_record) if isinstance(old_record, dict) else []
+    if not records and config_path is not None:
+        records = hook_adapters.handler_records(settings, host, root)
+    modified_scripts = set(modified_handlers)
+    result["handlers"] = [
+        record
+        for record in records
+        if isinstance(record, dict) and record.get("script") in modified_scripts
+    ]
+    old_files = old_record.get("files", {}) if isinstance(old_record, dict) else {}
+    files = result.get("files", {})
+    if not isinstance(files, dict):
+        files = {}
+    candidate_relatives = set(modified_files)
+    candidate_relatives.update(_relative(root, path) for path in protected_paths)
+    for relative in candidate_relatives:
+        if not _is_obsolete_hook_path(host, relative):
+            continue
+        digest = old_files.get(relative) if isinstance(old_files, dict) else None
+        if not isinstance(digest, str):
+            digest = legacy_hashes.get(relative)
+        if isinstance(digest, str):
+            files[relative] = digest
+    # A retained payload dependency is part of the migrated legacy ownership record even
+    # when the shared file itself was not modified.  This lets uninstall preserve it
+    # alongside the handler, rather than orphaning a script import.
+    result["files"] = files
+    return result
+
+
 def _managed_file_changes(
     root: str,
     old_record: dict[str, Any] | None,
     desired: dict[str, bytes],
     *,
     uninstall: bool,
+    host: hosts.Host | None = None,
 ) -> tuple[list[str], list[str]]:
-    """Return (unchanged stale paths to remove, modified paths to report)."""
+    """Return ``(unchanged stale paths, modified paths)``.
+
+    Ordinary package files retain the old zero-overwrite safety rule.  Obsolete hook
+    files are different: an upgrade must leave a user-modified hook in place and report
+    it, while an unchanged one is safely removable.
+    """
     if not isinstance(old_record, dict) or not isinstance(old_record.get("files"), dict):
         return [], []
     desired_rel = {_relative(root, path) for path in desired}
@@ -687,9 +753,10 @@ def _managed_file_changes(
             raise InstallerError(f"manifest-managed path is not a regular file: {relative}")
         current = _read_bytes(target) or b""
         unchanged = isinstance(digest, str) and _sha256(current) == digest
+        obsolete_hook = host is not None and _is_obsolete_hook_path(host, relative)
         if not unchanged:
             modified.append(relative)
-            if not uninstall:
+            if not uninstall and not obsolete_hook:
                 raise InstallerError(f"manifest-managed file was modified: {relative}")
         elif relative not in desired_rel:
             stale.append(target)
@@ -706,6 +773,24 @@ def _load_legacy_fingerprint() -> dict[str, Any]:
     if not isinstance(value, dict) or not isinstance(value.get("hosts"), dict):
         raise InstallerError("legacy fingerprint data is malformed")
     return value
+
+
+def _legacy_fingerprint_files(root: str, host: hosts.Host) -> tuple[bool, dict[str, str]]:
+    """Verify only the ordinary/legacy files, without reading host configuration."""
+    data = _load_legacy_fingerprint().get("hosts", {}).get(host.id)
+    if not isinstance(data, dict) or not isinstance(data.get("files"), dict):
+        return False, {}
+    hashes: dict[str, str] = {}
+    for relative, digest in data["files"].items():
+        if not isinstance(relative, str) or not isinstance(digest, str):
+            return False, {}
+        target = _safe_path(root, relative)
+        if not os.path.isfile(target) or stat.S_ISLNK(os.lstat(target).st_mode):
+            return False, {}
+        if _sha256(_read_bytes(target) or b"") != digest:
+            return False, {}
+        hashes[relative] = digest
+    return True, hashes
 
 
 def _legacy_event_for(host: hosts.Host, canonical_event: str) -> str:
@@ -729,12 +814,17 @@ def _legacy_handler_shape(  # noqa: PLR0911
     expected_commands: list[str],
 ) -> bool:
     """Check the complete grouped v0.5 config, not just command substrings."""
+    if not hook_adapters.legacy_handlers_required(host):
+        return False
     if not all(isinstance(command, str) for command in expected_commands):
         return False
     if host.id == "cursor" and not (
         type(settings.get("version", 1)) is int and settings.get("version", 1) == 1
     ):
         return False
+    # Codex's v0.5 project layout was root-level; Claude, Cursor, and Pi used a
+    # top-level hooks object.  This is historical recognition data, not a fresh config
+    # contract, and the host-specific matcher table below keeps the layouts narrow.
     nested = host.id in {"claude", "cursor", "pi"}
     container: object = settings.get("hooks") if nested else settings
     if not isinstance(container, dict):
@@ -747,10 +837,18 @@ def _legacy_handler_shape(  # noqa: PLR0911
     timeout_by_script = {
         script: timeout for _event, _matcher, script, timeout in hook_adapters._BASE_SPECS
     }
-    event_by_script = {
-        script: {_legacy_event_for(host, event), event}
-        for event, _matcher, script, _timeout in hook_adapters._BASE_SPECS
-    }
+    event_by_script: dict[str, set[str]] = {}
+    for event, _matcher, script, _timeout in hook_adapters._BASE_SPECS:
+        wanted_events = {
+            _legacy_event_for(host, event),
+            event,
+            *hook_adapters._expected_event(host, script),
+        }
+        if script == "absence_claim_guard.py":
+            # v0.5 Codex builds existed both before and after its adapter selected
+            # PreToolUse; accept either historical event only with the full fingerprint.
+            wanted_events.update({"PreToolUse", "PostToolUse", "preToolUse", "postToolUse"})
+        event_by_script[script] = wanted_events
     expected_scripts: dict[str, str] = {}
     for command in expected:
         for script in hook_adapters.HOOK_SCRIPTS:
@@ -783,8 +881,15 @@ def _legacy_handler_shape(  # noqa: PLR0911
                 if handler.get("timeout") != timeout_by_script.get(script):
                     return False
                 if script in {"bib_provenance_guard.py", "absence_claim_guard.py"}:
-                    tools = set(getattr(host, "write_tools", ()) or ())
-                    if not isinstance(matcher, str) or set(matcher.split("|")) != tools:
+                    inner_matcher = handler.get("matcher")
+                    if inner_matcher is not None and not (
+                        hook_adapters.legacy_write_matcher_matches(host, inner_matcher)
+                    ):
+                        return False
+                elif "matcher" in handler:
+                    return False
+                if script in {"bib_provenance_guard.py", "absence_claim_guard.py"}:
+                    if not hook_adapters.legacy_write_matcher_matches(host, matcher):
                         return False
                     if host.id == "claude":
                         condition = handler.get("if")
@@ -819,29 +924,36 @@ def _legacy_handler_shape(  # noqa: PLR0911
 
 
 def _legacy_adoption(
-    root: str, host: hosts.Host, settings: dict[str, Any]
+    root: str,
+    host: hosts.Host,
+    settings: dict[str, Any],
+    *,
+    hashes: dict[str, str] | None = None,
 ) -> tuple[bool, dict[str, str]]:
-    """Recognise a complete exact no-manifest v0.5 install, never a partial one."""
-    data = _load_legacy_fingerprint().get("hosts", {}).get(host.id)
-    if not isinstance(data, dict) or not isinstance(data.get("files"), dict):
+    """Recognise a complete exact no-manifest v0.5 install, never a partial one.
+
+    File evidence is deliberately separable from host configuration.  In particular,
+    Kimi's published legacy layout has no hook files and must be recognized from its
+    exact ordinary files without parsing or changing an unrelated settings file.
+    """
+    complete, fingerprint_hashes = (
+        (True, hashes) if hashes is not None else _legacy_fingerprint_files(root, host)
+    )
+    if not complete:
         return False, {}
-    hashes: dict[str, str] = {}
-    for relative, digest in data["files"].items():
-        if not isinstance(relative, str) or not isinstance(digest, str):
-            return False, {}
-        target = _safe_path(root, relative)
-        if not os.path.isfile(target) or stat.S_ISLNK(os.lstat(target).st_mode):
-            return False, {}
-        if _sha256(_read_bytes(target) or b"") != digest:
-            return False, {}
-        hashes[relative] = digest
-    if host.hooks:
-        expected_commands = data.get("handler_commands")
-        if not isinstance(expected_commands, list) or not _legacy_handler_shape(
-            settings, host, expected_commands
-        ):
-            return False, {}
-    return True, hashes
+    if not hook_adapters.legacy_handlers_required(host):
+        return True, dict(fingerprint_hashes)
+    data = _load_legacy_fingerprint().get("hosts", {}).get(host.id)
+    if not isinstance(data, dict):
+        return False, {}
+    expected_commands = data.get("handler_commands")
+    if (
+        not isinstance(expected_commands, list)
+        or not expected_commands
+        or not _legacy_handler_shape(settings, host, expected_commands)
+    ):
+        return False, {}
+    return True, dict(fingerprint_hashes)
 
 
 def _legacy_stale_paths(
@@ -1264,55 +1376,93 @@ def _build_plan(
     next_hosts = dict(existing_hosts)
 
     for host in selected:
-        # This is deliberately before any plan can be applied.  Legacy assets are user
-        # data; even a byte-for-byte old copy is not silently removed.
+        # Legacy rs-* skill names remain an explicit migration boundary.  They are user
+        # data and are never silently deleted.
         _legacy_guard(root, host)
         desired = _desired_files(root, host)
-        config_path = (
-            _safe_path(root, os.path.join(host.ownership_root, host.hooks_file))
-            if host.hooks
-            else None
-        )
-        settings = (
-            load_settings(config_path)
-            if config_path and os.path.exists(config_path)
-            else {}
-        )
-        if (
-            host.hooks
-            and "hooks" in settings
-            and not isinstance(settings.get("hooks"), dict)
-        ):
-            raise InstallerError(
-                f"{host.ownership_root}/{host.hooks_file} has a non-object hooks key"
-            )
-        if host.id == "cursor" and not (
-            type(settings.get("version", 1)) is int and settings.get("version", 1) == 1
-        ):
-            raise InstallerError(
-                "Cursor hooks.json version must be 1 when explicitly present"
-            )
         old_record = existing_hosts.get(host.id)
         if old_record is not None and not isinstance(old_record, dict):
             raise InstallerError(f"manifest host {host.id!r} is malformed")
-        owned_records = (
-            _record_handlers(old_record) if isinstance(old_record, dict) else None
-        )
-        modified_handlers = _check_handlers(
-            settings,
-            host,
-            old_record,
-            root=root,
-            uninstall=uninstall,
-        )
+
+        config_path: str | None = None
+        settings: dict[str, Any] = {}
+        owned_records: list[dict[str, Any]] | None = None
+        legacy_complete = False
+        legacy_hashes: dict[str, str] = {}
+
+        if manifest is not None:
+            # A manifest's explicit config field is ownership evidence.  A format-2
+            # record with config=None must not cause a foreign settings file to be read.
+            owned_config = (
+                old_record.get("config") if isinstance(old_record, dict) else None
+            )
+            if isinstance(owned_config, str):
+                config_candidate = _safe_path(root, owned_config)
+                if os.path.exists(config_candidate):
+                    config_path = config_candidate
+                    settings = load_settings(config_path)
+                owned_records = (
+                    _record_handlers(old_record) if isinstance(old_record, dict) else None
+                )
+        else:
+            # Prove the complete ordinary-file fingerprint before opening any host config.
+            # This keeps a fresh skills-only install independent of malformed foreign JSON.
+            files_complete, candidate_hashes = _legacy_fingerprint_files(root, host)
+            if files_complete:
+                legacy_hashes = candidate_hashes
+                if hook_adapters.legacy_config_supported(host):
+                    config_relative = os.path.join(host.ownership_root, host.hooks_file)
+                    config_candidate = _safe_path(root, config_relative)
+                    if os.path.exists(config_candidate):
+                        config_path = config_candidate
+                        settings = load_settings(config_path)
+                    legacy_complete, legacy_hashes = _legacy_adoption(
+                        root, host, settings, hashes=candidate_hashes
+                    )
+                else:
+                    # Hosts such as Kimi have ordinary legacy assets but no supported
+                    # hook surface.  Recognition intentionally does not inspect settings.
+                    legacy_complete, legacy_hashes = _legacy_adoption(
+                        root, host, {}, hashes=candidate_hashes
+                    )
+
         stale_paths, modified_files = _managed_file_changes(
-            root, old_record, desired, uninstall=uninstall
+            root,
+            old_record,
+            desired,
+            uninstall=uninstall,
+            host=host,
         )
-        legacy_complete, legacy_hashes = (
-            _legacy_adoption(root, host, settings) if manifest is None else (False, {})
-        )
-        if legacy_complete and not uninstall:
+        if legacy_complete:
             stale_paths.extend(_legacy_stale_paths(root, desired, legacy_hashes))
+
+        new_settings = None
+        modified_handlers: list[str] = []
+        if config_path:
+            cleaned, _removed, modified_handlers = hook_adapters.cleanup(
+                settings,
+                host,
+                root=root,
+                owned_records=owned_records,
+                allow_legacy=legacy_complete,
+            )
+            if cleaned != settings:
+                new_settings = cleaned
+
+        # A modified retained handler still points at its old script.  Never remove the
+        # script merely because v0.8 no longer desires hook files.
+        owned_relatives = (
+            old_record.get("files", {}).keys()
+            if isinstance(old_record, dict) and isinstance(old_record.get("files"), dict)
+            else legacy_hashes.keys()
+        )
+        protected_scripts = _modified_handler_paths(
+            root,
+            host,
+            modified_handlers,
+            owned_relatives=owned_relatives,
+        )
+        stale_paths = [path for path in stale_paths if path not in protected_scripts]
 
         if uninstall:
             if old_record is not None:
@@ -1323,9 +1473,12 @@ def _build_plan(
                         continue
                     if _sha256(_read_bytes(target) or b"") == digest:
                         remove_paths.append(target)
+                remove_paths = [
+                    path for path in remove_paths if path not in protected_scripts
+                ]
             else:
-                # Without a manifest, only a complete historical install or files that
-                # exactly equal today's source may be adopted for removal.
+                # Without a manifest, only exact current source files or a complete
+                # fingerprinted legacy install may be adopted for removal.
                 _preflight_file_conflicts(
                     root,
                     desired,
@@ -1344,22 +1497,9 @@ def _build_plan(
                 ]
                 if legacy_complete:
                     remove_paths.extend(_legacy_stale_paths(root, desired, legacy_hashes))
-            new_settings = (
-                merge_hooks(
-                    settings,
-                    True,
-                    host,
-                    root,
-                    owned_records,
-                    allow_legacy=legacy_complete,
-                )
-                if host.hooks and os.path.exists(config_path or "")
-                else None
-            )
-            if new_settings == settings:
-                # Do not rewrite a foreign config during a no-op uninstall;
-                # ownership is not inferred from a historical command string.
-                new_settings = None
+                remove_paths = [
+                    path for path in remove_paths if path not in protected_scripts
+                ]
             next_hosts.pop(host.id, None)
         else:
             _preflight_file_conflicts(
@@ -1369,23 +1509,21 @@ def _build_plan(
                 old_record=old_record,
                 legacy_hashes=legacy_hashes if legacy_complete else None,
             )
-            new_settings = (
-                merge_hooks(
-                    settings,
-                    False,
-                    host,
-                    root,
-                    owned_records,
-                    allow_legacy=legacy_complete,
-                )
-                if host.hooks
-                else None
-            )
-            record_settings = new_settings if new_settings is not None else settings
-            next_hosts[host.id] = _manifest_host_record(
-                root, host, desired, record_settings
+            next_record = _manifest_host_record(root, host, desired, settings)
+            next_hosts[host.id] = _legacy_metadata_record(
+                root,
+                host,
+                next_record,
+                old_record,
+                settings,
+                config_path,
+                legacy_hashes,
+                modified_files,
+                modified_handlers,
+                protected_scripts,
             )
             remove_paths = []
+
         host_plans.append(
             {
                 "host": host,
@@ -1415,12 +1553,10 @@ def _build_plan(
 
 
 def _prune_empty(root: str, host: hosts.Host) -> None:
+    """Prune only package-owned skills/command directories, never hook directories."""
     for relative in (
         os.path.join(host.skills_dir),
-        os.path.join(
-            host.commands_dir or "",
-        ),
-        os.path.join(host.ownership_root, "hooks"),
+        os.path.join(host.commands_dir or ""),
     ):
         if not relative:
             continue
@@ -1531,14 +1667,21 @@ def install(root: str, requested: str | None = None) -> int:
                         "  configured "
                         + path.removeprefix(root + os.sep).replace(os.sep, "/")
                     )
-                if host.hooks:
-                    print(
-                        f"  configured {host.ownership_root}/{host.hooks_file} "
-                        f"({hook_adapters.for_host(host).style} adapter)"
-                    )
-                caveat = hook_adapters.caveat(host) or host.caveat
-                if caveat:
-                    print(f"  note: {caveat}")
+                modified_files = next(
+                    plan_host.get("modified_files", [])
+                    for plan_host in plan["hosts"]
+                    if plan_host["host"] == host
+                )
+                modified_handlers = next(
+                    plan_host.get("modified_handlers", [])
+                    for plan_host in plan["hosts"]
+                    if plan_host["host"] == host
+                )
+                for path in modified_files:
+                    print(f"  preserved {path}  (legacy file was modified)")
+                for script in modified_handlers:
+                    print(f"  preserved handler {script}  (legacy handler was modified)")
+                print("  note: no runtime governance hooks installed")
             print(
                 f"\nai-research-skills configured for: "
                 f"{', '.join(host.id for host in selected)}"
@@ -1548,7 +1691,8 @@ def install(root: str, requested: str | None = None) -> int:
             if commanded:
                 print(
                     f"Commands ({', '.join(commanded)}): /ars-survey /ars-gate "
-                    "/ars-relwork /ars-brief /ars-watch /ars-audit /ars-help"
+                    "/ars-relwork /ars-brief /ars-watch /ars-audit /ars-verify "
+                    "/ars-help /ars-lint"
                 )
             uncommanded = [host.id for host in selected if not host.commands_dir]
             if uncommanded:
@@ -1663,296 +1807,365 @@ def read_settings_quiet(path: str) -> dict[str, Any] | None:
         return None
 
 
-def _path_is_within(path: str, directory: str) -> bool:
-    try:
-        common = os.path.commonpath((path, directory))
-    except (OSError, ValueError):
-        return False
-    return os.path.normcase(common) == os.path.normcase(directory)
-
-
-def _supported_python_launcher(path: str) -> bool:
-    name = os.path.basename(path).casefold()
-    if name.endswith(".exe"):
-        name = name[:-4]
-    if name == "python":
-        return True
-    if not name.startswith("python"):
-        return False
-    version = name.removeprefix("python").split(".")
-    return len(version) in (1, 2) and all(
-        part and all("0" <= character <= "9" for character in part) for part in version
-    )
-
-
-def _standard_interpreter_paths(base_prefix: str) -> tuple[str, ...]:
-    version = sys.version_info
-    names = (
-        "python",
-        f"python{version.major}",
-        f"python{version.major}.{version.minor}",
-        "python.exe",
-        f"python{version.major}.exe",
-        f"python{version.major}.{version.minor}.exe",
-    )
-    directories = (
-        base_prefix,
-        os.path.join(base_prefix, "bin"),
-        os.path.join(base_prefix, "Scripts"),
-    )
-    return tuple(
-        os.path.join(directory, name) for directory in directories for name in names
-    )
-
-
-def _path_value(value: object) -> str | None:
-    if not isinstance(value, (str, bytes, os.PathLike)):
-        return None
-    try:
-        raw = os.fspath(value)
-        if isinstance(raw, bytes):
-            raw = os.fsdecode(raw)
-        return os.path.abspath(raw) if isinstance(raw, str) and raw else None
-    except (OSError, TypeError, ValueError):
-        return None
-
-
-def _trusted_executable(value: object) -> str | None:
-    """Accept only a regular executable statically proven to be the base Python."""
-    raw = _path_value(value)
-    base_raw = _path_value(getattr(sys, "base_prefix", None))
-    if raw is None or base_raw is None:
-        return None
-    try:
-        candidate = os.path.realpath(raw)
-        base_prefix = os.path.realpath(base_raw)
-        mode = os.stat(candidate).st_mode
-    except (OSError, ValueError):
-        return None
-    if (
-        not os.path.isdir(base_prefix)
-        or not _path_is_within(candidate, base_prefix)
-        or not stat.S_ISREG(mode)
-        or not os.access(candidate, os.X_OK)
-    ):
-        return None
-    if _supported_python_launcher(candidate):
-        return candidate
-    for standard in _standard_interpreter_paths(base_prefix):
-        try:
-            if os.path.samefile(candidate, standard):
-                return candidate
-        except (OSError, ValueError):
-            continue
-    return None
-
-
-def _trusted_python_executable() -> str | None:
-    """Return the interpreter independent of PYTHONEXECUTABLE when available.
-
-    ``sys.executable`` is mutable on macOS through PYTHONEXECUTABLE.  The base
-    interpreter is populated before that override and is also the right target for
-    virtual environments and Windows.  There is no safe fallback to an arbitrary
-    ``sys.executable``: if the base path is unavailable, the self-test must fail
-    closed rather than execute a path whose provenance cannot be established.
-    """
-    return _trusted_executable(getattr(sys, "_base_executable", None))
-
-
-def _verify_installed_validator(root: str, host: hosts.Host) -> bool:
-    """Check installed validator bytes, then self-test only trusted package code."""
-    installed_dir = os.path.join(host.ownership_root, "ai-research-skills", "scripts")
-    try:
-        for name in VALIDATOR_RUNTIME_ASSETS:
-            path = _safe_path(root, os.path.join(installed_dir, name))
-            if not os.path.isfile(path) or os.path.islink(path):
-                return False
-            source = _read_bytes(os.path.join(SRC_SCRIPTS, name))
-            installed = _read_bytes(path)
-            if source is None or installed != source:
-                return False
-    except InstallerError:
-        return False
-
-    trusted_python = _trusted_python_executable()
-    if trusted_python is None:
-        return False
-    trusted_validator = os.path.join(SRC_SCRIPTS, "rs_validate.py")
-    trusted_env = {
-        name: value
-        for name, value in os.environ.items()
-        if not name.upper().startswith("PYTHON")
-    }
-    trusted_env["ARS_FORCE_FALLBACK"] = "1"
-    try:
-        result = subprocess.run(
-            [trusted_python, "-I", "-S", trusted_validator, "--self-test"],
-            capture_output=True,
-            text=True,
-            check=False,
-            env=trusted_env,
-            timeout=5.0,
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        return False
-    return result.returncode == 0
-
-
-def _doctor_manifest(root: str, manifest: dict[str, Any] | None) -> tuple[bool, str]:
-    if manifest is None:
-        return False, "manifest missing"
-    try:
-        _read_manifest(root)
-    except InstallerError as exc:
-        return False, str(exc)
-    return True, ""
-
-
 def doctor(root: str, requested: str | None = None) -> int:
+    """Diagnose without repairing ordinary files; clean only proven legacy hook state."""
     root = os.path.abspath(root)
-    selected, rc = _selected(root, requested)
-    if rc:
-        return rc
     try:
-        manifest = _read_manifest(root)
-    except InstallerError as exc:
+        with _install_lock(root, create_root=False):
+            if not os.path.lexists(root):
+                selected, rc = _selected(root, requested)
+                if not rc:
+                    print(f"ai-research-skills doctor — {root}\\n  not installed")
+                    rc = 1
+                return rc
+            _recover_journal(root)
+            selected, rc = _selected(root, requested)
+            if rc:
+                return rc
+            manifest = _read_manifest(root)
+            if manifest is None:
+                # A host directory is not evidence that the standalone suite is
+                # installed.  Only a complete legacy fingerprint permits config parsing
+                # or transactional cleanup; ordinary assets are never copied here.
+                legacy_state: list[dict[str, Any]] = []
+                for host in selected:
+                    _legacy_guard(root, host)
+                    legacy_config_path: str | None = None
+                    legacy_settings: dict[str, Any] = {}
+                    complete = False
+                    hashes: dict[str, str] = {}
+                    files_complete, candidate_hashes = _legacy_fingerprint_files(root, host)
+                    if files_complete:
+                        hashes = candidate_hashes
+                        if hook_adapters.legacy_config_supported(host):
+                            config_candidate = _safe_path(
+                                root, os.path.join(host.ownership_root, host.hooks_file)
+                            )
+                            if os.path.exists(config_candidate):
+                                legacy_config_path = config_candidate
+                                legacy_settings = load_settings(legacy_config_path)
+                            complete, hashes = _legacy_adoption(
+                                root, host, legacy_settings, hashes=candidate_hashes
+                            )
+                        else:
+                            complete, hashes = _legacy_adoption(
+                                root, host, {}, hashes=candidate_hashes
+                            )
+                    candidates: list[str] = []
+                    if complete and legacy_config_path:
+                        _unchanged, _removed, candidates = hook_adapters.cleanup(
+                            legacy_settings,
+                            host,
+                            root=root,
+                            allow_legacy=False,
+                        )
+                    legacy_state.append(
+                        {
+                            "host": host,
+                            "config_path": legacy_config_path,
+                            "settings": legacy_settings,
+                            "complete": complete,
+                            "hashes": hashes,
+                            "candidates": candidates,
+                        }
+                    )
+
+                print(f"ai-research-skills doctor — {root}")
+                print(f"hosts: {', '.join(host.id for host in selected)}")
+                if not all(state["complete"] for state in legacy_state):
+                    for state in legacy_state:
+                        host = state["host"]
+                        if state["complete"]:
+                            print(f"{host.id} — complete legacy install recognized")
+                        else:
+                            print(f"{host.id} — not installed (manifest missing)")
+                        for script in state["candidates"]:
+                            print(
+                                f"  preserved candidate handler {script} "
+                                "(legacy ownership was not proven)"
+                            )
+                    print("  no suite files installed or repaired")
+                    return 1
+
+                legacy_plans: list[dict[str, Any]] = []
+                for state in legacy_state:
+                    host = state["host"]
+                    legacy_settings = state["settings"]
+                    cleaned, _removed, modified = hook_adapters.cleanup(
+                        legacy_settings,
+                        host,
+                        root=root,
+                        allow_legacy=True,
+                    )
+                    protected = _modified_handler_paths(
+                        root,
+                        host,
+                        modified,
+                        owned_relatives=state["hashes"].keys(),
+                    )
+                    legacy_stale_paths: list[str] = []
+                    for relative, digest in state["hashes"].items():
+                        if not _is_obsolete_hook_path(host, relative):
+                            continue
+                        target = _safe_path(root, relative)
+                        if (
+                            os.path.isfile(target)
+                            and not os.path.islink(target)
+                            and _sha256(_read_bytes(target) or b"") == digest
+                            and target not in protected
+                        ):
+                            legacy_stale_paths.append(target)
+                    new_settings = cleaned if cleaned != legacy_settings else None
+                    legacy_plans.append(
+                        {
+                            "host": host,
+                            "desired": {},
+                            "config_path": (
+                                state["config_path"] if new_settings is not None else None
+                            ),
+                            "new_settings": new_settings,
+                            "remove_paths": [],
+                            "stale_paths": legacy_stale_paths,
+                            "modified_files": [],
+                            "modified_handlers": modified,
+                        }
+                    )
+
+                if any(
+                    plan["stale_paths"] or plan["new_settings"] is not None
+                    for plan in legacy_plans
+                ):
+                    _apply(root, {"hosts": legacy_plans, "manifest": None}, False)
+                failures = 0
+                for plan in legacy_plans:
+                    host = plan["host"]
+                    print(f"{host.id} — complete legacy install recognized")
+                    for path in plan["stale_paths"]:
+                        print(f"  removed {_relative(root, path)}")
+                    for script in plan["modified_handlers"]:
+                        print(f"  preserved handler {script} (legacy handler was modified)")
+                        failures += 1
+                    _prune_empty(root, host)
+                print("  no suite files installed or repaired")
+                return 1 if failures else 0
+
+            records = manifest.get("hosts")
+            if not isinstance(records, dict):
+                raise InstallerError("manifest hosts is not an object")
+            host_plans: list[dict[str, Any]] = []
+            statuses: list[dict[str, Any]] = []
+            cleanup_required = manifest.get("format") == LEGACY_MANIFEST_FORMAT
+            for host in selected:
+                record = records.get(host.id)
+                if not isinstance(record, dict):
+                    statuses.append({"host": host, "record": None, "items": []})
+                    continue
+                record_files = record.get("files", {})
+                if not isinstance(record_files, dict):
+                    raise InstallerError(f"manifest host {host.id!r} files is malformed")
+                expected = _desired_files(root, host)
+                status_items: list[tuple[str, str]] = []
+                all_relatives = {_relative(root, path) for path in expected}
+                all_relatives.update(
+                    relative
+                    for relative in record_files
+                    if isinstance(relative, str)
+                    and not _is_obsolete_hook_path(host, relative)
+                )
+                hook_modified: list[str] = []
+                for relative in sorted(all_relatives):
+                    target = _safe_path(root, relative)
+                    digest = record_files.get(relative)
+                    status = "ok"
+                    if not os.path.lexists(target):
+                        status = "MISS"
+                    elif (
+                        stat.S_ISLNK(os.lstat(target).st_mode)
+                        or not os.path.isfile(target)
+                        or not isinstance(digest, str)
+                        or _sha256(_read_bytes(target) or b"") != digest
+                    ):
+                        status = "MODIFIED"
+                    status_items.append((relative, status))
+                for relative, digest in record_files.items():
+                    if not isinstance(relative, str) or not _is_obsolete_hook_path(
+                        host, relative
+                    ):
+                        continue
+                    target = _safe_path(root, relative)
+                    if not os.path.lexists(target):
+                        continue
+                    if (
+                        not os.path.isfile(target)
+                        or stat.S_ISLNK(os.lstat(target).st_mode)
+                        or not isinstance(digest, str)
+                        or _sha256(_read_bytes(target) or b"") != digest
+                    ):
+                        hook_modified.append(relative)
+
+                config_path: str | None = None
+                settings: dict[str, Any] = {}
+                owned_config = record.get("config")
+                if isinstance(owned_config, str):
+                    config_candidate = _safe_path(root, owned_config)
+                    if os.path.exists(config_candidate):
+                        config_path = config_candidate
+                        settings = load_settings(config_path)
+                cleaned = settings
+                modified_handlers: list[str] = []
+                if config_path:
+                    cleaned, _removed, modified_handlers = hook_adapters.cleanup(
+                        settings,
+                        host,
+                        root=root,
+                        owned_records=_record_handlers(record),
+                        allow_legacy=False,
+                    )
+                stale_paths: list[str] = []
+                for relative, digest in record_files.items():
+                    if not isinstance(relative, str) or not _is_obsolete_hook_path(
+                        host, relative
+                    ):
+                        continue
+                    target = _safe_path(root, relative)
+                    if (
+                        os.path.isfile(target)
+                        and not os.path.islink(target)
+                        and isinstance(digest, str)
+                        and _sha256(_read_bytes(target) or b"") == digest
+                    ):
+                        stale_paths.append(target)
+                protected = _modified_handler_paths(
+                    root,
+                    host,
+                    modified_handlers,
+                    owned_relatives=record_files.keys(),
+                )
+                stale_paths = [path for path in stale_paths if path not in protected]
+                new_settings = cleaned if cleaned != settings else None
+                if stale_paths or new_settings is not None:
+                    cleanup_required = True
+                host_plans.append(
+                    {
+                        "host": host,
+                        "desired": {},
+                        "config_path": config_path if new_settings is not None else None,
+                        "new_settings": new_settings,
+                        "remove_paths": [],
+                        "stale_paths": stale_paths,
+                        "modified_files": hook_modified,
+                        "modified_handlers": modified_handlers,
+                    }
+                )
+                statuses.append(
+                    {
+                        "host": host,
+                        "record": record,
+                        "items": status_items,
+                        "hook_modified": hook_modified,
+                        "modified_handlers": modified_handlers,
+                        "config_path": config_path,
+                        "settings": settings,
+                    }
+                )
+
+            next_manifest = None
+            if cleanup_required:
+                migrated = copy.deepcopy(manifest)
+                migrated.pop("manifest_sha256", None)
+                migrated["format"] = MANIFEST_FORMAT
+                migrated["version"] = __version__
+                migrated_hosts = migrated.get("hosts", {})
+                status_by_host = {state["host"].id: state for state in statuses}
+                for host in selected:
+                    record = migrated_hosts.get(host.id)
+                    if not isinstance(record, dict):
+                        continue
+                    old_record = copy.deepcopy(record)
+                    files = record.get("files", {})
+                    if isinstance(files, dict):
+                        record["files"] = {
+                            relative: digest
+                            for relative, digest in files.items()
+                            if not (
+                                isinstance(relative, str)
+                                and _is_obsolete_hook_path(host, relative)
+                            )
+                        }
+                    record["config"] = None
+                    record["handlers"] = []
+                    record["adapter"] = "none"
+                    state = status_by_host.get(host.id, {})
+                    state_settings = state.get("settings", {})
+                    if not isinstance(state_settings, dict):
+                        state_settings = {}
+                    state_config = state.get("config_path")
+                    if not isinstance(state_config, str):
+                        state_config = None
+                    state_modified_files = state.get("hook_modified", [])
+                    if not isinstance(state_modified_files, list):
+                        state_modified_files = []
+                    state_modified_handlers = state.get("modified_handlers", [])
+                    if not isinstance(state_modified_handlers, list):
+                        state_modified_handlers = []
+                    protected = _modified_handler_paths(
+                        root,
+                        host,
+                        state_modified_handlers,
+                        owned_relatives=old_record.get("files", {}).keys()
+                        if isinstance(old_record.get("files"), dict)
+                        else (),
+                    )
+                    migrated_hosts[host.id] = _legacy_metadata_record(
+                        root,
+                        host,
+                        record,
+                        old_record,
+                        state_settings,
+                        state_config,
+                        {},
+                        state_modified_files,
+                        state_modified_handlers,
+                        protected,
+                    )
+                next_manifest = _seal_manifest(migrated)
+                _apply(root, {"hosts": host_plans, "manifest": next_manifest}, False)
+
+            failures = 0
+            any_installed = False
+            print(f"ai-research-skills doctor — {root}")
+            print(f"hosts: {', '.join(host.id for host in selected)}")
+            for state in statuses:
+                host = state["host"]
+                record = state["record"]
+                installed = isinstance(record, dict)
+                any_installed = any_installed or installed
+                print(f"{host.id} — standalone skills")
+                if not installed:
+                    print("  MISS manifest host record")
+                    failures += 1
+                    continue
+                for relative, status in state["items"]:
+                    print(f"  {'ok  ' if status == 'ok' else status} {relative}")
+                    failures += int(status != "ok")
+                for relative in state.get("hook_modified", []):
+                    print(f"  preserved {relative} (legacy file was modified)")
+                    failures += 1
+                for script in state.get("modified_handlers", []):
+                    print(f"  preserved handler {script} (legacy handler was modified)")
+                    failures += 1
+                print("  note  no runtime governance hooks are managed")
+                print()
+            if not any_installed:
+                failures += 1
+            if failures:
+                print(f"{failures} item(s) need attention")
+            else:
+                print("all structural checks passed")
+            return 1 if failures else 0
+    except Exception as exc:
         print(f"error: {exc}")
         return 1
-    if manifest is None:
-        print("error: manifest missing")
-        return 1
-    print(f"ai-research-skills doctor — {root}")
-    print(f"hosts: {', '.join(host.id for host in selected)}\n")
-    failures = 0
-    any_installed = False
-
-    def item(label: str, ok: bool, detail: str = "") -> None:
-        nonlocal failures
-        if not ok:
-            failures += 1
-        print(f"  {'ok  ' if ok else 'MISS'} {label}" + (f" — {detail}" if detail else ""))
-
-    manifest_hosts = (manifest or {}).get("hosts", {}) if isinstance(manifest, dict) else {}
-    item("manifest present and SHA256 valid", manifest is not None)
-    for host in selected:
-        record = manifest_hosts.get(host.id) if isinstance(manifest_hosts, dict) else None
-        installed = isinstance(record, dict) or any(
-            os.path.isfile(os.path.join(root, host.skills_dir, skill, "SKILL.md"))
-            for skill in SKILLS
-        )
-        if not installed:
-            print(f"{host.id} — not installed")
-            continue
-        any_installed = True
-        if not isinstance(record, dict):
-            item(f"{host.id} manifest host record", False)
-        print(f"{host.id} — suite files")
-        for skill in SKILLS:
-            item(
-                f"{host.skills_dir}/{skill}/SKILL.md",
-                os.path.isfile(os.path.join(root, host.skills_dir, skill, "SKILL.md")),
-            )
-        if host.commands_dir:
-            for name in COMMANDS:
-                item(
-                    f"{host.commands_dir}/{name}",
-                    os.path.isfile(os.path.join(root, host.commands_dir, name)),
-                )
-        if host.hooks:
-            for name in _installed_hook_scripts(host):
-                item(
-                    f"{host.ownership_root}/hooks/{name}",
-                    os.path.isfile(os.path.join(root, host.ownership_root, "hooks", name)),
-                )
-        support = os.path.join(root, host.ownership_root, "ai-research-skills")
-        for name in sorted(os.listdir(SRC_SCRIPTS)):
-            if not os.path.isfile(os.path.join(SRC_SCRIPTS, name)):
-                continue
-            item(
-                f"{host.ownership_root}/ai-research-skills/scripts/{name}",
-                os.path.isfile(os.path.join(support, "scripts", name)),
-            )
-        for name in SCHEMAS:
-            item(
-                f"{host.ownership_root}/ai-research-skills/schemas/{name}",
-                os.path.isfile(os.path.join(support, "schemas", name)),
-            )
-        if host.hooks:
-            config_relative = os.path.join(host.ownership_root, host.hooks_file)
-            try:
-                config_path = _safe_path(root, config_relative)
-                settings = read_settings_quiet(config_path)
-                config_detail = ""
-            except InstallerError as exc:
-                settings = None
-                config_detail = str(exc)
-            item(
-                f"{host.ownership_root}/{host.hooks_file} is valid JSON and not a symlink",
-                settings is not None,
-                config_detail,
-            )
-            if settings is not None:
-                shape_errors = hook_adapters.validate_config(settings, host, root)
-                item(
-                    "host adapter root/event/handler/matcher shape",
-                    not shape_errors,
-                    "; ".join(shape_errors),
-                )
-                handler_error = ""
-                try:
-                    _check_handlers(settings, host, record, root=root)
-                except InstallerError as exc:
-                    handler_error = str(exc)
-                item(
-                    "manifest-owned handler fingerprints", not handler_error, handler_error
-                )
-            validator_ok = isinstance(record, dict) and _verify_installed_validator(
-                root, host
-            )
-            item(
-                "installed validator matches trusted package and self-test",
-                validator_ok,
-            )
-            if host.id == "pi":
-                print(
-                    "  note  configured-but-inactive/degraded: Pi extension load "
-                    "cannot be confirmed"
-                )
-            else:
-                omitted = hook_adapters.for_host(host).omitted_events()
-                if omitted:
-                    print(
-                        "  note  degraded: unsupported events omitted ("
-                        + ", ".join(omitted)
-                        + ")"
-                    )
-                else:
-                    print("  note  configured; runtime dispatch is host responsibility")
-        if record is not None:
-            expected_files = record.get("files", {}) if isinstance(record, dict) else {}
-            for relative, digest in expected_files.items():
-                try:
-                    target = _safe_path(root, relative)
-                    actual = (
-                        _sha256(_read_bytes(target) or b"")
-                        if os.path.isfile(target)
-                        else None
-                    )
-                    item(f"manifest hash {relative}", actual == digest)
-                except InstallerError as exc:
-                    item(f"manifest path {relative}", False, str(exc))
-        print()
-
-    print("search backends")
-    print(
-        "  hint  run the host's MCP/backend diagnostic separately; this check does not "
-        "infer runtime activity"
-    )
-    if not any_installed:
-        print("\nnot installed for any selected host")
-        return 1
-    print(f"\n{failures} item(s) missing" if failures else "\nall checks passed")
-    return 1 if failures else 0
 
 
 def legacy_main(argv: list[str]) -> int:

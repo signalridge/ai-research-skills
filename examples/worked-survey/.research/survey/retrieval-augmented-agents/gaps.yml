@@ -10,7 +10,7 @@ gaps:
         - 'ti:"controlled comparison" AND abs:"retrieval augmented"'
         - "matched retrieval budget long context agent question answering"
       venues_swept: ["ICLR@2025-2026", "NeurIPS@2025", "ACL@2025-2026"]
-      citation_chains: ["W2626778328:cites:1"]
+      citation_chains: ["W0000000000:cites:1"]
       nearest_prior_work:
         - key: alpha2025iterative
           why_not_it: "controls token budget, not retrieval recall — the two arms see different amounts of relevant evidence"
@@ -30,7 +30,7 @@ gaps:
         - 'abs:"3-hop" AND abs:"long context"'
         - "long context models deeper multi-hop evaluation beyond two hops"
       venues_swept: ["ICLR@2025-2026", "NeurIPS@2025", "ACL@2025-2026"]
-      citation_chains: ["W2626778328:cites:1"]
+      citation_chains: ["W0000000000:cites:1"]
       nearest_prior_work:
         - key: gamma2026threehop
           why_not_it: "extends to 3+ hops but only for iterative retrieval; no long-context arm exists"

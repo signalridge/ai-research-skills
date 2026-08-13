@@ -1,22 +1,21 @@
 ---
-description: Start or resume a literature survey — the only stage that searches
-argument-hint: "<topic or research question>"
+disable-model-invocation: true
 ---
+# /ars-survey
 
-Run the `ars-survey` skill for: **$ARGUMENTS**
+Use `ars-survey` when you want a literature-research task. Give it a question, source list,
+files, links, or a named `.research/survey/<slug>/` workspace.
 
-Before anything else, check for existing state:
+Choose the work in your request: discover sources, screen a supplied set, extract evidence,
+compare findings, draft a synthesis, or combine those pieces. The skill is standalone and
+user-invoked; there is no required phase order or complete workspace. Ask before saving or
+rewriting persistent artifacts.
 
-```bash
-ls .research/survey/ 2>/dev/null
-```
+Useful prompt:
 
-If a survey matching this topic exists, read its `protocol.yml`, report the current `phase`,
-and **resume at `phase + 1`**. Do not restart a survey because the corpus looks unfamiliar —
-read it.
+> Survey X using the supplied papers and two fresh searches. Record source IDs and access dates,
+> extract the numbers used in the answer, then write a short synthesis and list search limits.
 
-If none exists, begin at Phase 0 (Scope). Follow `.claude/skills/ars-survey/SKILL.md` and load each
-`references/0N-*.md` only when entering that phase.
-
-Stop at the Phase 0 checkpoint and wait for confirmation before searching. Searching is the
-expensive part and a wrong grid discovered at Phase 4 costs the whole survey.
+Missing files are a limitation to report, not a reason to invent a result. For a focused output,
+invoke `ars-related-work`, `ars-gap-gate`, `ars-decision-brief`, `ars-watch`, `ars-red-team`, or
+`ars-verify` directly.

@@ -1,21 +1,12 @@
 ---
-description: 3-gate go/no-go dossier for a surveyed research gap (verdict withheld)
-argument-hint: "[survey slug or gap id]"
+disable-model-invocation: true
 ---
+# /ars-gate
 
-Run the `ars-gap-gate` skill for: **$ARGUMENTS**
+Assess a proposed research gap or topic. Supply the claim, sources, files, or optional
+`.research/survey/<slug>/` workspace. Ask explicitly if you want a search for counterexamples.
 
-Requires a completed survey. Verify first:
-
-```bash
-ls .research/survey/*/gaps.yml .research/survey/*/coverage.yml 2>/dev/null
-```
-
-If `gaps.yml` is missing or `protocol.yml` has `phase < 4`, stop and say the survey must
-reach Phase 4 first. **Do not search to fill the hole.**
-
-Check `evidence_of_absence.last_checked` on every gap before scoring G1. If it is more than
-30 days old, offer `/ars-watch check` first — G1 scored against stale evidence is the single
-most expensive error this suite can make.
-
-Assemble the evidence for all three gates and **stop short of the verdict**.
+Report whether the claim appears open, why it could matter, what makes it feasible or risky,
+and the cheapest test that could change the assessment. Missing artifacts produce a stated
+limitation and follow-up suggestion; they do not block the report. The final decision remains
+the user's.

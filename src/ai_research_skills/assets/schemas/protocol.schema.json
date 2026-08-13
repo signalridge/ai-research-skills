@@ -1,89 +1,61 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/signalridge/ai-research-skills/schemas/protocol.schema.json",
-  "title": "Search protocol",
-  "description": "The reproducible search contract. Phase 0 freezes scope and axes; later phases add ledgers and freshness.",
+  "title": "Optional research protocol",
+  "description": "An interoperable workspace record. All fields are optional so a researcher can use only the artifacts needed for a task; legacy phase fields remain readable.",
   "type": "object",
-  "required": ["topic", "question", "created", "phase", "scope", "axes"],
-  "additionalProperties": false,
+  "additionalProperties": true,
   "properties": {
-    "topic": {"type": "string", "pattern": "^[a-z0-9-]+$"},
-    "question": {"type": "string", "minLength": 20},
+    "topic": {"type": "string"},
+    "question": {"type": "string"},
     "created": {"type": "string", "format": "date"},
     "last_searched_at": {"type": "string", "format": "date"},
+    "search": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "not_attempted",
+            "success",
+            "success_no_hits",
+            "partial_success",
+            "backend_failure",
+            "unknown"
+          ]
+        },
+        "backend": {"type": "string", "minLength": 1},
+        "queries": {"type": "array", "items": {"type": "string"}},
+        "note": {"type": "string"}
+      }
+    },
     "phase": {"type": "integer", "minimum": 0, "maximum": 5},
     "scope": {
       "type": "object",
-      "required": ["in", "out"],
-      "additionalProperties": false,
+      "additionalProperties": true,
       "properties": {
-        "in": {"type": "array", "items": {"type": "string"}, "minItems": 1},
-        "out": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+        "in": {"type": "array", "items": {"type": "string"}},
+        "out": {"type": "array", "items": {"type": "string"}},
         "window": {"type": "string"},
         "venues": {"type": "array", "items": {"type": "string"}}
       }
     },
     "axes": {
       "type": "array",
-      "minItems": 2,
       "items": {
         "type": "object",
-        "required": ["name", "values"],
-        "additionalProperties": false,
+        "additionalProperties": true,
         "properties": {
-          "name": {"type": "string", "minLength": 1},
-          "values": {"type": "array", "items": {"type": "string"}, "minItems": 2}
+          "name": {"type": "string"},
+          "values": {"type": "array", "items": {"type": "string"}}
         }
       }
     },
-    "recall_modes": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "keyword": {"type": "array", "items": {"type": "object"}},
-        "citation_chain": {"type": "array", "items": {"type": "object"}},
-        "venue_author": {"type": "array", "items": {"type": "object"}},
-        "contrarian": {"type": "array", "items": {"type": "object"}}
-      }
-    },
-    "screen": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "include": {"type": "array", "items": {"type": "string"}},
-        "exclude": {"type": "array", "items": {"type": "string"}},
-        "relevance_threshold": {"type": "integer", "minimum": 1, "maximum": 10}
-      }
-    },
-    "counts": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "retrieved": {"type": "integer", "minimum": 0},
-        "deduped": {"type": "integer", "minimum": 0},
-        "adjudicated": {"type": "integer", "minimum": 0},
-        "scored_at_or_above_threshold": {"type": "integer", "minimum": 0},
-        "unsure": {"type": "integer", "minimum": 0},
-        "fulltext_kept": {"type": "integer", "minimum": 0}
-      }
-    },
-    "saturation": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "rounds": {"type": "integer", "minimum": 1},
-        "new_on_topic_last_round": {"type": "integer", "minimum": 0},
-        "baseline_growth": {"type": "string"},
-        "stop_rule": {"type": "string"}
-      }
-    },
-    "budget": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "openalex_usd_spent": {"type": "number", "minimum": 0},
-        "openalex_usd_remaining": {"type": "number", "minimum": 0}
-      }
-    }
+    "recall_modes": {"type": "object", "additionalProperties": true},
+    "screen": {"type": "object", "additionalProperties": true},
+    "counts": {"type": "object", "additionalProperties": true},
+    "saturation": {"type": "object", "additionalProperties": true},
+    "budget": {"type": "object", "additionalProperties": true}
   }
 }

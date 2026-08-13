@@ -11,7 +11,7 @@ sync:
     uv sync
     uv run python install.py .
 
-# Full suite, with pyyaml + jsonschema so structural checks run
+# Full suite, with pyyaml + jsonschema for the optional scoped linter
 test:
     uv run --group dev python tests/run_tests.py
 
@@ -90,7 +90,7 @@ links:
     print("\n".join(bad) if bad else "no dead links")
     sys.exit(1 if bad else 0)
 
-# Schema-check a survey state directory
+# Explicitly lint the present artifacts in a research directory
 validate dir:
     uv run --group dev python src/ai_research_skills/assets/scripts/rs_validate.py {{dir}}
 

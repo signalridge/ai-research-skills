@@ -1,17 +1,9 @@
 ---
-description: Build/adopt/skip decision brief from a completed survey
-argument-hint: "<the decision you are making>"
+disable-model-invocation: true
 ---
+# /ars-brief
 
-Run the `ars-decision-brief` skill for: **$ARGUMENTS**
-
-Ask for the decision context first — what is being built, what the alternative is, what the
-cost of being wrong is. A brief written without it answers a question nobody asked.
-
-Weight evidence by reproducibility, not venue: a reproduced arXiv preprint beats an
-unreproduced NeurIPS oral. `code.runs: verified` outranks everything else.
-
-Include the rows with **no** support — a claim the design depends on that nobody has
-established is the most valuable line in the table. Cross-reference `gaps.yml`.
-
-Unlike `ars-gap-gate`, do make a recommendation. State the uncertainty in the same breath.
+Prepare a build/adopt/skip/revisit brief from the evidence you supply or ask the skill to
+search. Include a claim-to-source matrix, evidence depth, reproducibility/status, costs, and
+what would change the call. A named workspace is optional. Do not silently modify its corpus or
+protocol; save only the file the user requests.

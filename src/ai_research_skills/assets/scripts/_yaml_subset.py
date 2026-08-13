@@ -309,8 +309,8 @@ def scalar(text: str) -> Any:
     lowered = value.lower()
     if lowered in ("null", "~"):
         return None
-    if lowered in ("true", "false"):
-        return lowered == "true"
+    if lowered in ("true", "yes", "on", "false", "no", "off"):
+        return lowered in ("true", "yes", "on")
     if re.fullmatch(r"[-+]?\d+", value):
         try:
             return int(value)

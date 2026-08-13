@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Thin shim so a checkout keeps working: python3 install.py [path] [--uninstall].
+"""Checkout shim: ``python3 install.py [path] [--uninstall]``.
 
-The real installer is the ai_research_skills package under src/; from an installed
-copy prefer `ai-research-skills install|uninstall|doctor` instead.
+The real installer is the ai_research_skills package under ``src/``. From an installed copy,
+use ``ai-research-skills install|uninstall|doctor|lint``.
 """
 
 import os

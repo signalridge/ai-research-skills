@@ -4,8 +4,11 @@
 
 # The product's source of truth is src/ai_research_skills/assets/. Everything under .claude/ here
 # is output from `ai-research-skills install .` — the way this repo dogfoods its own
-# guards — so none of it is tracked. `just sync` regenerates it after a fresh clone.
+# skills — so none of it is tracked. `just sync` regenerates it after a fresh clone.
 /.claude/
+
+# Installer ownership and transaction metadata are generated project state, not source.
+/.ai-research-skills/
 
 # Python
 __pycache__/

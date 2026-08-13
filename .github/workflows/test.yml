@@ -21,9 +21,8 @@ jobs:
         with:
           enable-cache: true
           python-version: ${{ matrix.python }}
-      # The hooks run in whatever python3 the user already has, so the default path must
-      # work with nothing installed. --no-project gives an environment with no project
-      # and no dependency group — the bare interpreter, reproduced.
+      # The optional linter runs in whatever python3 the user already has, so the default
+      # path must work with nothing installed. --no-project reproduces that environment.
       - name: tests (bare interpreter, no packages)
         run: uv run --no-project python tests/run_tests.py
       - name: tests (with structural validation)
@@ -107,7 +106,7 @@ jobs:
       - uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
-      # The wheel is how uvx installs the suite; it must carry the assets.
+      # The wheel is how uvx installs the suite; it must carry the standalone assets.
       - name: wheel smoke build
         run: |
           uv build
@@ -120,4 +119,6 @@ jobs:
           uv run --with dist/*.whl ai-research-skills install /tmp/scratch
           uv run --with dist/*.whl ai-research-skills doctor /tmp/scratch
           test -f /tmp/scratch/.claude/skills/ars-survey/SKILL.md
-          test -f /tmp/scratch/.claude/settings.json
+          test -f /tmp/scratch/.claude/commands/ars-lint.md
+          test ! -e /tmp/scratch/.claude/settings.json
+          test ! -d /tmp/scratch/.claude/hooks

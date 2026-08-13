@@ -1,17 +1,17 @@
-"""Host hook dialects used by the installer and doctor.
+"""Legacy hook recognizers and cleanup helpers.
 
-The guards are host-neutral, but their configuration and their stdout contracts are not.
-This module is the single place that describes event capabilities, command ownership and
-config shape.  In particular, ownership is exact: a command mentioning a script name is
-not enough to make a foreign handler ours.
+ARS 0.8 does not generate, install, or validate runtime governance hooks.  This module is
+kept for one compatibility period so an upgrade or explicit doctor run can remove an
+exact, unchanged ARS handler from an older install.  It deliberately has no desired
+handler builder: fresh installs never touch host hook configuration.
 """
 
 from __future__ import annotations
 
+import copy
 import os
 import shlex
 from collections.abc import Iterable
-from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
 
@@ -23,7 +23,7 @@ HOOK_SCRIPTS = (
     "stop_survey_peer.py",
 )
 
-# canonical event, matcher, script, timeout
+# Historical event/script metadata is intentionally data for recognition only.
 _BASE_SPECS = (
     ("PreToolUse", "write", "bib_provenance_guard.py", 10),
     ("PostToolUse", "write", "absence_claim_guard.py", 10),
@@ -39,14 +39,53 @@ _CLAUDE_CONDITIONS = {
     ),
 }
 
+# These are the exact write-tool matchers emitted by historical host adapters.  They
+# are used only after the ordinary-file fingerprint proves an old ARS install; they are
+# not a current host configuration contract.  A couple of hosts had more than one
+# published spelling during the compatibility window, so keep those spellings explicit.
+_LEGACY_WRITE_MATCHERS: dict[str, frozenset[str]] = {
+    "claude": frozenset({"Write|Edit"}),
+    "codex": frozenset({"apply_patch|Write|Edit", "Write|Edit"}),
+    "cursor": frozenset({"Write|Edit"}),
+    "pi": frozenset({"write|edit", "Write|Edit"}),
+}
+_LEGACY_HANDLER_HOSTS = frozenset(_LEGACY_WRITE_MATCHERS)
+
+
+def legacy_handlers_required(host: Any) -> bool:
+    """Whether the old host had an ARS hook layout to prove before cleanup."""
+    return str(getattr(host, "id", "")) in _LEGACY_HANDLER_HOSTS
+
+
+def legacy_config_supported(host: Any) -> bool:
+    """Whether exact legacy hook configuration may be inspected for this host."""
+    return legacy_handlers_required(host)
+
+
+def _legacy_grouped_ownership_provened(
+    settings: dict[str, Any],
+    host: Any,
+    root: str | None,
+    owned_records: Iterable[dict[str, Any]] | None,
+    allow_legacy: bool,
+) -> bool:
+    """Return whether grouped Cursor migration has complete ownership evidence."""
+    return host.id == "cursor" and allow_legacy
+
+
+def legacy_write_matcher_matches(host: Any, matcher: object) -> bool:
+    """Return whether *matcher* is a published matcher for this old host."""
+    return isinstance(matcher, str) and matcher in _LEGACY_WRITE_MATCHERS.get(
+        str(getattr(host, "id", "")), frozenset()
+    )
+
 
 @dataclass(frozen=True)
 class HookAdapter:
     host_id: str
-    style: str
+    style: str = "grouped"
     nested: bool = True
     event_names: tuple[tuple[str, str], ...] = ()
-    config_extra: tuple[tuple[str, object], ...] = ()
     supports_session_start: bool = True
     supports_stop: bool = True
     absence_event: str | None = None
@@ -55,19 +94,23 @@ class HookAdapter:
         return dict(self.event_names).get(canonical, canonical)
 
     def specs(self) -> tuple[tuple[str, str | None, str, int], ...]:
-        out: list[tuple[str, str | None, str, int]] = []
-        for canonical_event, matcher, script, timeout in _BASE_SPECS:
-            if canonical_event == "SessionStart" and not self.supports_session_start:
+        result: list[tuple[str, str | None, str, int]] = []
+        for event, matcher, script, timeout in _BASE_SPECS:
+            if event == "SessionStart" and not self.supports_session_start:
                 continue
-            if canonical_event == "Stop" and not self.supports_stop:
+            if event == "Stop" and not self.supports_stop:
                 continue
-            event = (
-                self.absence_event
-                if script == "absence_claim_guard.py" and self.absence_event
-                else canonical_event
+            result.append(
+                (
+                    self.absence_event
+                    if script == "absence_claim_guard.py" and self.absence_event
+                    else event,
+                    matcher,
+                    script,
+                    timeout,
+                )
             )
-            out.append((event, matcher, script, timeout))
-        return tuple(out)
+        return tuple(result)
 
     def omitted_events(self) -> tuple[str, ...]:
         omitted: list[str] = []
@@ -79,71 +122,34 @@ class HookAdapter:
 
 
 ADAPTERS: dict[str, HookAdapter] = {
-    "claude": HookAdapter("claude", "grouped"),
-    # Codex's official project file is {"hooks": {"PreToolUse": [...]}}.  Its
-    # absence guard is deliberately on PreToolUse too: Codex does not accept a
-    # Claude PostToolUse permission decision.
-    "codex": HookAdapter("codex", "grouped", nested=True, absence_event="PreToolUse"),
-    # Cursor's native entries are direct {command, matcher?, timeout?} definitions.
-    # Its stop event only accepts a follow-up request, not a non-looping advisory, so
-    # the stop guard is omitted and the installer reports that degradation.
+    "claude": HookAdapter("claude"),
+    "codex": HookAdapter("codex", absence_event="PreToolUse"),
     "cursor": HookAdapter(
         "cursor",
-        "direct",
-        nested=True,
+        style="direct",
         event_names=(
             ("PreToolUse", "preToolUse"),
             ("PostToolUse", "postToolUse"),
             ("SessionStart", "sessionStart"),
             ("Stop", "stop"),
         ),
-        config_extra=(("version", 1),),
         supports_stop=False,
         absence_event="PreToolUse",
     ),
-    "pi": HookAdapter("pi", "grouped"),
+    "pi": HookAdapter("pi"),
+    "kimi": HookAdapter("kimi"),
 }
 
 
 def for_host(host: Any) -> HookAdapter:
-    """Return the adapter for a Host-like object without importing hosts."""
-    try:
-        return ADAPTERS[host.id]
-    except (AttributeError, KeyError):
-        return HookAdapter(str(getattr(host, "id", "unknown")), "grouped")
+    return ADAPTERS.get(str(getattr(host, "id", "")), HookAdapter("unknown"))
 
 
 def _shell_path(path: str) -> str:
-    # shlex.quote is intentionally used rather than interpolating a project path into
-    # shell source.  Hook runners invoke this string as a command.
     return shlex.quote(path)
 
 
-def command_for(host: Any, script: str, root: str | None = None) -> str:
-    """Build the command installed for *host*.
-
-    Claude owns the one documented project-root variable.  Every other host gets an
-    absolute path because hooks may be launched while the agent's cwd is a subdirectory.
-    The profile flag selects the stdout dialect in ``_payload.py``.
-    """
-    if host.id == "claude":
-        return f'python3 "$CLAUDE_PROJECT_DIR/.claude/hooks/{script}"'
-    if root is None:
-        # Kept for callers that only need a display/compatibility command.  Installer
-        # mutation always passes root and therefore never depends on cwd.
-        path = os.path.join(host.ownership_root, "hooks", script)
-    else:
-        path = os.path.join(os.path.abspath(root), host.ownership_root, "hooks", script)
-    return f"python3 {_shell_path(path)} --host {shlex.quote(host.id)}"
-
-
-def historical_command_forms(host: Any, script: str) -> tuple[str, ...]:
-    """Exact commands emitted by the published pre-manifest 0.5 installer.
-
-    These are migration fingerprints, not a substring heuristic.  They are intentionally
-    small and stable so a foreign ``echo survey_staleness.py`` or ``*.backup`` remains
-    foreign.
-    """
+def _legacy_relative_command(host: Any, script: str) -> tuple[str, ...]:
     if host.id == "claude":
         return (
             f'python3 "$CLAUDE_PROJECT_DIR/.claude/hooks/{script}"',
@@ -153,81 +159,30 @@ def historical_command_forms(host: Any, script: str) -> tuple[str, ...]:
     return (f'python3 "{host.ownership_root}/hooks/{script}"',)
 
 
-def is_ours(command: object, host: Any | None = None, root: str | None = None) -> bool:
-    """Recognise only an exact generated or published migration command."""
-    if host is None:
-        candidates: list[tuple[str, str]] = [
-            ("claude", ".claude"),
-            ("codex", ".codex"),
-            ("cursor", ".cursor"),
-            ("pi", ".pi"),
-        ]
-        for host_id, ownership in candidates:
-            for script in HOOK_SCRIPTS:
-                old = (
-                    (
-                        f'python3 "$CLAUDE_PROJECT_DIR/.claude/hooks/{script}"',
-                        f'python3 ".claude/hooks/{script}"',
-                        f"python3 .claude/hooks/{script}",
-                    )
-                    if host_id == "claude"
-                    else (f'python3 "{ownership}/hooks/{script}"',)
-                )
-                relative = os.path.join(ownership, "hooks", script)
-                if command in old or (
-                    host_id != "claude"
-                    and command == f"python3 {_shell_path(relative)} --host {host_id}"
-                ):
-                    return True
-                if root is not None:
-                    absolute = os.path.join(
-                        os.path.abspath(root), ownership, "hooks", script
-                    )
-                    if command == f"python3 {_shell_path(absolute)} --host {host_id}":
-                        return True
-        return False
-    for script in HOOK_SCRIPTS:
-        if command in historical_command_forms(host, script):
-            return True
-        if command == command_for(host, script, root):
-            return True
-    return False
+def historical_command_forms(host: Any, script: str) -> tuple[str, ...]:
+    """Commands emitted by pre-0.8 ARS versions, for exact cleanup only."""
+    return _legacy_relative_command(host, script)
 
 
-def _matcher(host: Any, canonical_matcher: str | None) -> str | None:
-    if canonical_matcher is None:
-        return None
-    tools = tuple(getattr(host, "write_tools", ()) or ())
-    return "|".join(tools) if tools else canonical_matcher
+def _current_command(host: Any, script: str, root: str) -> str:
+    if host.id == "claude":
+        return f'python3 "$CLAUDE_PROJECT_DIR/.claude/hooks/{script}"'
+    path = os.path.join(os.path.abspath(root), host.ownership_root, "hooks", script)
+    return f"python3 {_shell_path(path)} --host {shlex.quote(host.id)}"
 
 
-def handler_definition(  # noqa: PLR0913, PLR0917
-    host: Any,
-    matcher: str | None,
-    script: str,
-    timeout: int,
-    condition: str | None = None,
-    root: str | None = None,
-) -> dict[str, Any]:
-    """Build one native handler definition, not a whole event group."""
-    adapter = for_host(host)
-    definition: dict[str, Any] = {
-        "command": command_for(host, script, root),
-        "timeout": timeout,
-    }
-    if condition is not None:
-        definition["if"] = condition
-    match = _matcher(host, matcher)
-    if match is not None:
-        definition["matcher"] = match
-    if adapter.style == "grouped":
-        return {"type": "command", **definition}
-    # Cursor rejects Claude's type/hooks wrapper.  Do not add even harmless-looking
-    # fields: direct definitions are the native contract.
-    return definition
+def command_for(host: Any, script: str, root: str | None = None) -> str:
+    """Return an old command fingerprint for compatibility callers.
+
+    The installer never uses this to create a handler.  It exists so old manifests and
+    migration tests can describe the command they are removing.
+    """
+    if root is None:
+        return _legacy_relative_command(host, script)[0]
+    return _current_command(host, script, root)
 
 
-def _command_tokens(command: object) -> list[str]:
+def _tokens(command: object) -> list[str]:
     if not isinstance(command, str):
         return []
     try:
@@ -236,21 +191,37 @@ def _command_tokens(command: object) -> list[str]:
         return []
 
 
-def command_runs_script(command: object, script: str) -> bool:
-    """Recognise a Python hook command without basename substring matching."""
-    tokens = _command_tokens(command)
-    if not tokens or os.path.basename(tokens[0]) not in {"python", "python3"}:
+def _historical_prefix_script(command: object, host: Any) -> str | None:
+    """Classify only a historical command with explicit trailing arguments."""
+    actual = _tokens(command)
+    if not actual:
+        return None
+    for script in HOOK_SCRIPTS:
+        for form in historical_command_forms(host, script):
+            expected = _tokens(form)
+            if len(actual) > len(expected) and actual[: len(expected)] == expected:
+                return script
+    return None
+
+
+def _command_matches(command: object, host: Any, script: str, root: str | None) -> bool:
+    if not isinstance(command, str):
         return False
-    return any(os.path.basename(token) == script for token in tokens[1:])
+    if command in historical_command_forms(host, script):
+        return True
+    if root is None:
+        return False
+    expected = _tokens(_current_command(host, script, root))
+    actual = _tokens(command)
+    # A user-modified command remains identifiable for reporting, but only the exact
+    # token sequence is eligible for removal.  Extra arguments are a modification, not
+    # an exact match; script_for_command classifies that case for preservation/reporting.
+    return actual == expected
 
 
 def exact_script(command: object, host: Any, root: str | None = None) -> str | None:
-    if not isinstance(command, str):
-        return None
     for script in HOOK_SCRIPTS:
-        if command in historical_command_forms(host, script) or command == command_for(
-            host, script, root
-        ):
+        if _command_matches(command, host, script, root):
             return script
     return None
 
@@ -262,165 +233,480 @@ def script_for_command(
     *,
     allow_absolute_without_root: bool = False,
 ) -> str | None:
-    """Identify a generated handler even when a user appended an option.
-
-    Exact ownership still requires ``root`` (or a published historical form).  The
-    optional root-less absolute mode exists only for diagnostics of an already-loaded
-    config; mutation paths never use it to claim ownership.
-    """
-    exact = exact_script(command, host, root)
-    if exact is not None:
-        return exact
-    tokens = _command_tokens(command)
-    if len(tokens) < 2 or os.path.basename(tokens[0]) not in {"python", "python3"}:
+    script = exact_script(command, host, root)
+    if script is not None:
+        return script
+    script = _historical_prefix_script(command, host)
+    if script is not None:
+        return script
+    if not isinstance(command, str) or not allow_absolute_without_root:
+        return None
+    actual = _tokens(command)
+    if len(actual) < 2 or os.path.basename(actual[0]) not in {"python", "python3"}:
         return None
     for script in HOOK_SCRIPTS:
-        expected = _command_tokens(command_for(host, script, root))
+        marker = f"/hooks/{script}"
         if (
-            len(tokens) >= len(expected)
-            and tokens[: len(expected)] == expected
+            os.path.isabs(actual[1])
+            and actual[1].replace("\\", "/").endswith(marker)
             and (
-                root is not None
-                or (allow_absolute_without_root and os.path.isabs(tokens[1]))
+                host.id == "claude"
+                or (len(actual) >= 4 and actual[2:4] == ["--host", host.id])
             )
-        ):
-            return script
-        if (
-            allow_absolute_without_root
-            and host.id != "claude"
-            and len(expected) >= 4
-            and len(tokens) >= 4
-            and os.path.isabs(tokens[1])
-            and tokens[2:4] == expected[2:4]
-            and tokens[1].replace("\\", "/").endswith("/" + expected[1])
         ):
             return script
     return None
 
 
-def _record_matches(
-    item: dict[str, Any],
-    event: str,
-    script: str,
-    group_matcher: object,
-    expected: Iterable[dict[str, Any]],
-) -> bool:
-    actual_matcher = item.get("matcher", group_matcher)
-    for wanted in expected:
-        if wanted.get("script") != script or (event and wanted.get("event") != event):
-            continue
-        definition = wanted.get("definition")
-        if isinstance(definition, dict):
-            if definition == item and wanted.get("matcher") == actual_matcher:
-                return True
-            continue
-        if all(
-            wanted.get(key) == value
-            for key, value in (
-                ("command", item.get("command")),
-                ("matcher", actual_matcher),
-                ("timeout", item.get("timeout")),
-            )
-        ):
+def is_ours(command: object, host: Any | None = None, root: str | None = None) -> bool:
+    if host is not None:
+        return exact_script(command, host, root) is not None
+    for host_id in ADAPTERS:
+        candidate = type("Host", (), {"id": host_id, "ownership_root": f".{host_id}"})()
+        if exact_script(command, candidate, root) is not None:
             return True
     return False
 
 
-def _legacy_match(item: dict[str, Any], host: Any, script: str, root: str | None) -> bool:
-    command = item.get("command")
-    exact = set(historical_command_forms(host, script))
-    return isinstance(command, str) and command in exact
-
-
-def _current_match(  # noqa: PLR0913
-    item: dict[str, Any],
-    host: Any,
-    event: str,
-    script: str,
-    root: str | None,
-    *,
-    group_matcher: object = None,
-) -> bool:
-    """Match a complete generated definition, never a command string alone."""
+def _container(settings: dict[str, Any], host: Any) -> dict[str, Any] | None:
     adapter = for_host(host)
-    for spec_event, matcher, spec_script, timeout in adapter.specs():
-        if spec_script != script or adapter.event(spec_event) != event:
+    if adapter.nested:
+        value = settings.get("hooks")
+        return value if isinstance(value, dict) else None
+    return settings
+
+
+def _iter_handlers(
+    settings: dict[str, Any], host: Any
+) -> Iterable[tuple[str, Any, dict[str, Any], dict[str, Any] | None]]:
+    """Yield event, raw entry, handler and grouped wrapper for old layouts.
+
+    v0.5 had two layouts that are not the current native shape: Codex put event lists
+    at the JSON root, and Cursor used Claude-style grouped entries.  Keep those paths
+    visible to migration diagnostics without making either layout a fresh-install
+    contract.
+    """
+    adapter = for_host(host)
+    containers: list[dict[str, Any]] = []
+    nested = _container(settings, host)
+    if nested is not None:
+        containers.append(nested)
+    if host.id == "codex":
+        # Codex v0.5 could have root-level events even when there is no top-level
+        # ``hooks`` object.  If both shapes are present, the identity check below keeps
+        # a shared container from being traversed twice.
+        containers.append(settings)
+    seen_containers: set[int] = set()
+    for container in containers:
+        if id(container) in seen_containers:
             continue
-        if adapter.style == "grouped" and group_matcher != _matcher(host, matcher):
+        seen_containers.add(id(container))
+        for event, entries in list(container.items()):
+            if not isinstance(event, str) or not isinstance(entries, list):
+                continue
+            if adapter.style == "direct":
+                for entry in entries:
+                    if not isinstance(entry, dict):
+                        continue
+                    if "command" in entry:
+                        yield event, entry, entry, None
+                    elif host.id == "cursor" and isinstance(entry.get("hooks"), list):
+                        # Historical Cursor grouped handlers are candidates for
+                        # cleanup only; the current adapter remains direct.
+                        for handler in entry["hooks"]:
+                            if isinstance(handler, dict) and "command" in handler:
+                                yield event, entry, handler, entry
+            else:
+                for group in entries:
+                    if not isinstance(group, dict) or not isinstance(
+                        group.get("hooks"), list
+                    ):
+                        continue
+                    for handler in group["hooks"]:
+                        if isinstance(handler, dict) and "command" in handler:
+                            yield event, group, handler, group
+
+
+def _expected_event(host: Any, script: str) -> set[str]:
+    adapter = for_host(host)
+    expected: set[str] = set()
+    # Include both the current adapter event and the canonical v0.5 event.  The latter
+    # matters for events (notably Cursor Stop) that the current adapter intentionally
+    # omits but the historical fingerprint can still contain.
+    for event, _matcher, wanted, _timeout in _BASE_SPECS:
+        if wanted == script:
+            expected.update({event, adapter.event(event)})
+    for event, _matcher, wanted, _timeout in adapter.specs():
+        if wanted == script:
+            expected.update({event, adapter.event(event)})
+    if host.id == "codex" and script == "absence_claim_guard.py":
+        # The old Codex absence hook lived on PostToolUse as well as PreToolUse.
+        expected.update({"PostToolUse", "PreToolUse"})
+    return expected
+
+
+def _manifest_match(
+    event: str,
+    handler: dict[str, Any],
+    wrapper: dict[str, Any] | None,
+    script: str,
+    records: Iterable[dict[str, Any]],
+) -> bool:
+    """Match a complete manifest-owned handler, including its effective group shape."""
+    actual_matcher = handler.get("matcher", wrapper.get("matcher") if wrapper else None)
+    actual_wrapper = (
+        {key: copy.deepcopy(value) for key, value in wrapper.items() if key != "hooks"}
+        if wrapper is not None
+        else None
+    )
+
+    for record in records:
+        if not isinstance(record, dict):
             continue
-        conditions = _CLAUDE_CONDITIONS.get(script, ()) if host.id == "claude" else ()
-        expected = [
-            handler_definition(host, matcher, script, timeout, condition, root)
-            for condition in (conditions or (None,))
-        ]
-        if item in expected:
-            return True
+        # Every identifying field is part of the ownership proof.  In particular, a
+        # matching inner definition is not enough when its surrounding event/group was
+        # edited by the user.
+        if (
+            record.get("event") != event
+            or record.get("script") != script
+            or record.get("command") != handler.get("command")
+            or record.get("timeout") != handler.get("timeout")
+            or "definition" not in record
+            or not isinstance(record.get("definition"), dict)
+            or record["definition"] != handler
+        ):
+            continue
+        if "matcher" not in record and "effective_matcher" not in record:
+            continue
+        expected_matcher = record.get("effective_matcher", record.get("matcher"))
+        if expected_matcher != actual_matcher:
+            continue
+        if "matcher" in record and record.get("matcher") != actual_matcher:
+            continue
+        if wrapper is not None and ("matcher" in record or "group_matcher" in record):
+            expected_group_matcher = record.get("group_matcher", record.get("matcher"))
+            if wrapper.get("matcher") != expected_group_matcher:
+                continue
+
+        # Newer records may retain non-handler group metadata.  Compare it without the
+        # mutable ``hooks`` list so a foreign sibling cannot make an owned handler look
+        # like a different group (or vice versa).  The matcher above remains checked
+        # even for older records that have no metadata field.
+        for metadata_key in ("wrapper", "wrapper_metadata", "group", "group_metadata"):
+            if metadata_key not in record:
+                continue
+            expected_wrapper = record.get(metadata_key)
+            if isinstance(expected_wrapper, dict):
+                expected_wrapper = {
+                    key: copy.deepcopy(value)
+                    for key, value in expected_wrapper.items()
+                    if key != "hooks"
+                }
+            if expected_wrapper != actual_wrapper:
+                break
+        else:
+            for matcher_key in ("wrapper_matcher", "group_matcher"):
+                if matcher_key in record and record.get(matcher_key) != actual_matcher:
+                    break
+            else:
+                return True
     return False
 
 
-def _should_remove(  # noqa: PLR0913, PLR0917
-    item: Any,
-    host: Any,
+def _legacy_exact_shape(  # noqa: PLR0911
     event: str,
+    handler: dict[str, Any],
+    wrapper: dict[str, Any] | None,
+    host: Any,
     script: str,
-    group_matcher: object,
-    owned_records: Iterable[dict[str, Any]] | None,
-    root: str | None,
-    allow_legacy: bool,
 ) -> bool:
-    if not isinstance(item, dict):
+    """Recognize a complete old handler definition, not a script substring."""
+    command = handler.get("command")
+    if not isinstance(command, str):
         return False
-    if owned_records is not None:
-        return _record_matches(item, event, script, group_matcher, owned_records)
-    if _current_match(item, host, event, script, root, group_matcher=group_matcher):
-        return True
-    return allow_legacy and _legacy_match(item, host, script, root)
+    if command not in historical_command_forms(host, script):
+        return False
+    timeout = {item[2]: item[3] for item in _BASE_SPECS}.get(script)
+    if handler.get("timeout") != timeout:
+        return False
+
+    write_script = script in {"bib_provenance_guard.py", "absence_claim_guard.py"}
+    inner_matcher = handler.get("matcher")
+    if write_script and inner_matcher is not None:
+        if not legacy_write_matcher_matches(host, inner_matcher):
+            return False
+    elif not write_script and "matcher" in handler:
+        return False
+
+    if wrapper is None:
+        # Direct entries were introduced by the old Cursor adapter; command, timeout,
+        # and an optional write matcher are the complete native definition.
+        if any(key not in {"command", "timeout", "matcher"} for key in handler):
+            return False
+        expected_events = _expected_event(host, script)
+        return event in expected_events
+
+    if handler.get("type") != "command":
+        return False
+    if any(
+        key not in {"type", "command", "timeout", "matcher"}
+        and not (host.id == "claude" and key == "if")
+        for key in handler
+    ):
+        return False
+    if write_script:
+        matcher = wrapper.get("matcher")
+        if not legacy_write_matcher_matches(host, matcher):
+            return False
+    if host.id == "claude" and script in _CLAUDE_CONDITIONS:
+        condition = handler.get("if")
+        if condition not in _CLAUDE_CONDITIONS[script]:
+            return False
+    expected_events = _expected_event(host, script)
+    if script == "absence_claim_guard.py":
+        # Some pre-0.8 adapters placed this handler on PostToolUse; accept that
+        # historical location only after the complete legacy fingerprint matched.
+        expected_events.update({"PostToolUse", "postToolUse"})
+    return event in expected_events
 
 
-def _strip_grouped(  # noqa: PLR0913, PLR0917
-    entries: Iterable[Any],
-    host: Any,
-    event: str,
-    script: str | None,
-    owned_records: Iterable[dict[str, Any]] | None,
-    root: str | None,
-    allow_legacy: bool,
-) -> list[Any]:
-    kept: list[Any] = []
-    for raw in entries:
-        if not isinstance(raw, dict) or not isinstance(raw.get("hooks"), list):
-            kept.append(deepcopy(raw))
+def _remove_from_group(group: dict[str, Any], keep: list[Any]) -> dict[str, Any] | None:
+    if keep:
+        result = copy.deepcopy(group)
+        result["hooks"] = keep
+        return result
+    if any(key not in {"hooks", "matcher"} for key in group):
+        result = copy.deepcopy(group)
+        result["hooks"] = []
+        return result
+    return None
+
+
+def _migrate_cursor_grouped(settings: dict[str, Any], host: Any, root: str | None) -> None:
+    """Convert proven v0.5 Cursor groups to native direct entries."""
+    container = _container(settings, host)
+    if not isinstance(container, dict):
+        return
+    adapter = for_host(host)
+    preserved_metadata: list[dict[str, Any]] = []
+
+    def historical_script(
+        event: str, handler: dict[str, Any], wrapper: dict[str, Any]
+    ) -> str | None:
+        command = handler.get("command")
+        for script in HOOK_SCRIPTS:
+            if command not in historical_command_forms(host, script):
+                continue
+            if _legacy_exact_shape(event, handler, wrapper, host, script):
+                return script
+        return None
+
+    def convert(event: str, entries: object) -> list[Any]:
+        if not isinstance(entries, list):
+            return []
+        converted: list[Any] = []
+        for raw in entries:
+            if not isinstance(raw, dict) or not isinstance(raw.get("hooks"), list):
+                converted.append(copy.deepcopy(raw))
+                continue
+            group_metadata = {
+                key: copy.deepcopy(value)
+                for key, value in raw.items()
+                if key not in {"hooks", "matcher", "type"}
+            }
+            if group_metadata:
+                preserved_metadata.append({"event": event, **group_metadata})
+            matcher = raw.get("matcher")
+            for hook in raw["hooks"]:
+                if not isinstance(hook, dict):
+                    converted.append(copy.deepcopy(hook))
+                    continue
+                if historical_script(event, hook, raw) is not None:
+                    continue
+                native = copy.deepcopy(hook)
+                native.pop("type", None)
+                if matcher is not None and "matcher" not in native:
+                    native["matcher"] = copy.deepcopy(matcher)
+                converted.append(native)
+        return converted
+
+    # Cursor's old grouped adapter used canonical event names in some releases and
+    # native camelCase names in others.  Merge both spellings before directifying every
+    # grouped event, including foreign/custom events not emitted by ARS.
+    for canonical_event, _matcher, _script, _timeout in _BASE_SPECS:
+        destination = adapter.event(canonical_event)
+        if destination == canonical_event or canonical_event not in container:
             continue
-        removed = False
-        foreign: list[Any] = []
-        for hook in raw["hooks"]:
-            ours = script is not None and _should_remove(
-                hook,
+        source = container.get(canonical_event)
+        existing = container.get(destination)
+        if isinstance(source, list) and isinstance(existing, list):
+            container[destination] = copy.deepcopy(source) + copy.deepcopy(existing)
+            container.pop(canonical_event, None)
+        elif destination not in container:
+            container[destination] = copy.deepcopy(source)
+            container.pop(canonical_event, None)
+
+    for event, entries in list(container.items()):
+        if not isinstance(entries, list) or not entries:
+            continue
+        converted = convert(event, entries)
+        if converted:
+            container[event] = converted
+        else:
+            container.pop(event, None)
+
+    if preserved_metadata:
+        key = "_ars_legacy_cursor_group_metadata"
+        if key not in settings:
+            settings[key] = preserved_metadata
+        else:
+            suffix = 1
+            while f"{key}_{suffix}" in settings:
+                suffix += 1
+            settings[f"{key}_{suffix}"] = preserved_metadata
+
+
+def cleanup(
+    settings: dict[str, Any],
+    host: Any,
+    *,
+    root: str | None = None,
+    owned_records: Iterable[dict[str, Any]] | None = None,
+    allow_legacy: bool = False,
+) -> tuple[dict[str, Any], list[str], list[str]]:
+    """Remove exact old handlers and return ``(settings, removed, modified)``.
+
+    A command that looks like an ARS hook but differs from its manifest/legacy definition
+    is reported as modified and left in place.  Unknown commands, groups, and config keys
+    are copied untouched.  Both the historical Codex root layout and Cursor grouped
+    layout are traversed here because this function is the migration boundary.
+    """
+    result = copy.deepcopy(settings)
+    removed: list[str] = []
+    modified: list[str] = []
+    adapter = for_host(host)
+    migrate_cursor_grouped = _legacy_grouped_ownership_provened(
+        result, host, root, owned_records, allow_legacy
+    )
+    if migrate_cursor_grouped:
+        _migrate_cursor_grouped(result, host, root)
+    nested = _container(result, host)
+    containers: list[dict[str, Any]] = []
+    if nested is not None:
+        containers.append(nested)
+    if host.id == "codex":
+        containers.append(result)
+    seen: set[int] = set()
+    records = list(owned_records) if owned_records is not None else None
+
+    def inspect(
+        event: str, handler: dict[str, Any], wrapper: dict[str, Any] | None
+    ) -> tuple[str | None, bool]:
+        script = exact_script(handler.get("command"), host, root)
+        if script is None:
+            script = script_for_command(
+                handler.get("command"),
                 host,
-                event,
-                script,
-                raw.get("matcher"),
-                owned_records,
                 root,
-                allow_legacy,
+                allow_absolute_without_root=True,
             )
-            if ours:
-                removed = True
+        if script is None:
+            return None, False
+        exact = (
+            records is not None
+            and _manifest_match(event, handler, wrapper, script, records)
+        ) or (
+            records is None
+            and allow_legacy
+            and _legacy_exact_shape(event, handler, wrapper, host, script)
+        )
+        return script, exact
+
+    for container in containers:
+        if id(container) in seen:
+            continue
+        seen.add(id(container))
+        for event, raw_entries in list(container.items()):
+            if not isinstance(raw_entries, list):
+                continue
+            new_entries: list[Any] = []
+            for entry in raw_entries:
+                is_direct = (
+                    adapter.style == "direct"
+                    and isinstance(entry, dict)
+                    and "command" in entry
+                )
+                is_grouped = (
+                    isinstance(entry, dict)
+                    and isinstance(entry.get("hooks"), list)
+                    and (
+                        adapter.style != "direct"
+                        or (host.id == "cursor" and not migrate_cursor_grouped)
+                    )
+                )
+                if is_direct:
+                    script, exact = inspect(event, entry, None)
+                    if script is None:
+                        new_entries.append(copy.deepcopy(entry))
+                    elif exact:
+                        removed.append(script)
+                    else:
+                        modified.append(script)
+                        new_entries.append(copy.deepcopy(entry))
+                    continue
+                if not is_grouped:
+                    new_entries.append(copy.deepcopy(entry))
+                    continue
+
+                keep: list[Any] = []
+                for handler in entry["hooks"]:
+                    if not isinstance(handler, dict):
+                        keep.append(copy.deepcopy(handler))
+                        continue
+                    script, exact = inspect(event, handler, entry)
+                    if script is None:
+                        keep.append(copy.deepcopy(handler))
+                    elif exact:
+                        removed.append(script)
+                    else:
+                        modified.append(script)
+                        keep.append(copy.deepcopy(handler))
+                retained = _remove_from_group(entry, keep)
+                if retained is not None:
+                    new_entries.append(retained)
+            if new_entries:
+                container[event] = new_entries
+            elif raw_entries:
+                container.pop(event, None)
             else:
-                foreign.append(hook)
-        if not removed:
-            kept.append(deepcopy(raw))
-        elif foreign:
-            item = deepcopy(raw)
-            item["hooks"] = foreign
-            kept.append(item)
-        elif any(key not in {"hooks", "matcher"} for key in raw):
-            # Removing a handler must not erase unknown group metadata.
-            item = deepcopy(raw)
-            item["hooks"] = []
-            kept.append(item)
-        # An all-owned group without foreign metadata can be dropped.
-    return kept
+                # An empty foreign event list is not an ARS handler and must remain
+                # represented in the host config.
+                container[event] = copy.deepcopy(raw_entries)
+
+    # Empty hooks objects are deliberately retained: they may have been supplied by a
+    # foreign host configuration and their shape is not package ownership evidence.
+    return result, sorted(set(removed)), sorted(set(modified))
+
+
+def merge(  # noqa: PLR0913, PLR0917
+    settings: dict[str, Any],
+    uninstall: bool,
+    host: Any,
+    root: str | None = None,
+    owned_records: list[dict[str, Any]] | None = None,
+    allow_legacy: bool = False,
+) -> dict[str, Any]:
+    """Compatibility wrapper: cleanup only; never add a desired handler."""
+    if not uninstall:
+        return copy.deepcopy(settings)
+    cleaned, _removed, _modified = cleanup(
+        settings,
+        host,
+        root=root,
+        owned_records=owned_records,
+        allow_legacy=allow_legacy,
+    )
+    return cleaned
 
 
 def strip_ours(  # noqa: PLR0913
@@ -432,329 +718,52 @@ def strip_ours(  # noqa: PLR0913
     allow_legacy: bool = False,
     event: str | None = None,
 ) -> list[Any]:
-    """Remove only exact owned/migration handlers, preserving all foreign entries."""
+    """Legacy list helper retained for callers that clean one event list."""
     if not isinstance(entries, list):
         return []
-    adapter = for_host(host)
-    if adapter.style == "direct":
-        kept: list[Any] = []
-        for entry in entries:
-            if not isinstance(entry, dict):
-                kept.append(deepcopy(entry))
-                continue
-            script = exact_script(entry.get("command"), host, root)
-            ours = (
-                script is not None
-                and event is not None
-                and _should_remove(
-                    entry,
-                    host,
-                    event,
-                    script,
-                    None,
-                    owned_records,
-                    root,
-                    allow_legacy,
-                )
-            )
-            if not ours:
-                kept.append(deepcopy(entry))
-        return kept
-    result: list[Any] = [deepcopy(entry) for entry in entries]
-    # The grouped form has no single script at this API boundary.  Strip each known
-    # script independently so exact ownership rules still apply.
-    for script in HOOK_SCRIPTS:
-        result = _strip_grouped(
-            result,
-            host,
-            event or "",
-            script,
-            owned_records,
-            root,
-            allow_legacy,
-        )
-    return result
-
-
-def _strip_script(  # noqa: PLR0913
-    entries: Any,
-    host: Any,
-    script: str,
-    *,
-    event: str | None = None,
-    owned_records: Iterable[dict[str, Any]] | None = None,
-    root: str | None = None,
-    allow_legacy: bool = False,
-) -> list[Any]:
-    """Remove one script's exact definitions (needed when two guards share an event)."""
-    if not isinstance(entries, list):
-        return []
-    adapter = for_host(host)
-    effective_event = event or ""
-    if adapter.style == "direct":
-        kept: list[Any] = []
-        for entry in entries:
-            ours = isinstance(entry, dict) and _should_remove(
-                entry,
-                host,
-                effective_event,
-                script,
-                None,
-                owned_records,
-                root,
-                allow_legacy,
-            )
-            if not ours:
-                kept.append(deepcopy(entry))
-        return kept
-    return _strip_grouped(
-        entries,
-        host,
-        effective_event,
-        script,
-        owned_records,
-        root,
-        allow_legacy,
+    wrapper = {"hooks": entries}
+    settings = {"hooks": {event or "PreToolUse": wrapper}}
+    cleaned, _removed, _modified = cleanup(
+        settings, host, root=root, owned_records=owned_records, allow_legacy=allow_legacy
     )
-
-
-def _container(
-    settings: dict[str, Any], host: Any, create: bool = False
-) -> dict[str, Any] | None:
-    adapter = for_host(host)
-    if adapter.nested:
-        value = settings.get("hooks")
-        if isinstance(value, dict):
-            return value
-        if create:
-            value = {}
-            settings["hooks"] = value
-            return value
-        return None
-    return settings
-
-
-def _migrate_cursor_grouped(settings: dict[str, Any], host: Any, root: str | None) -> None:
-    """Convert v0.5 grouped Cursor handlers to native direct entries.
-
-    The old adapter used Claude's ``{matcher, hooks: [...]}`` groups.  Cursor's
-    current event lists cannot contain those wrappers, so foreign handlers are
-    copied as direct definitions while exact ARS commands are discarded.  Group
-    metadata has no native direct slot; retain it in a dedicated top-level
-    preservation record instead of silently dropping an unknown key.  Stop is
-    included even though the current Cursor adapter intentionally omits it.
-    """
-    container = _container(settings, host)
-    if not isinstance(container, dict):
-        return
-    adapter = for_host(host)
-    preserved_metadata: list[dict[str, Any]] = []
-
-    def convert(event: str, entries: object, script: str) -> list[Any]:
-        if not isinstance(entries, list):
-            return []
-        converted: list[Any] = []
-        for raw in entries:
-            if not isinstance(raw, dict) or not isinstance(raw.get("hooks"), list):
-                converted.append(deepcopy(raw))
-                continue
-            group_metadata = {
-                key: deepcopy(value)
-                for key, value in raw.items()
-                if key not in {"hooks", "matcher"}
-            }
-            if group_metadata:
-                preserved_metadata.append({"event": event, **group_metadata})
-            matcher = raw.get("matcher")
-            foreign_start = len(converted)
-            for hook in raw["hooks"]:
-                if not isinstance(hook, dict):
-                    converted.append(deepcopy(hook))
-                    continue
-                command = hook.get("command")
-                if isinstance(command, str) and command in historical_command_forms(
-                    host, script
-                ):
-                    continue
-                native = deepcopy(hook)
-                # `type=command` is the grouped wrapper's discriminator, not a
-                # Cursor direct-entry field.  Other foreign keys are retained.
-                native.pop("type", None)
-                if matcher is not None and "matcher" not in native:
-                    native["matcher"] = deepcopy(matcher)
-                converted.append(native)
-            if group_metadata:
-                for candidate in converted[foreign_start:]:
-                    if isinstance(candidate, dict) and "command" in candidate:
-                        for key, value in group_metadata.items():
-                            candidate.setdefault(key, deepcopy(value))
-                        break
-        return converted
-
-    for canonical_event, _matcher, script, _timeout in _BASE_SPECS:
-        destination = adapter.event(canonical_event)
-        merged: list[Any] = []
-        for source_event in {canonical_event, destination}:
-            if source_event not in container:
-                continue
-            source_entries = container.get(source_event)
-            if source_event == destination:
-                merged.extend(convert(source_event, source_entries, script))
-            else:
-                merged.extend(convert(source_event, source_entries, script))
-                container.pop(source_event, None)
-        if merged:
-            container[destination] = merged
-        else:
-            container.pop(destination, None)
-
-    if preserved_metadata:
-        existing = settings.get("_ars_legacy_cursor_group_metadata")
-        if isinstance(existing, list):
-            existing.extend(preserved_metadata)
-        elif existing is None:
-            settings["_ars_legacy_cursor_group_metadata"] = preserved_metadata
-        else:
-            # Do not overwrite a foreign value at our preservation key.
-            settings["_ars_legacy_cursor_group_metadata_1"] = preserved_metadata
-
-
-def merge(  # noqa: PLR0913, PLR0917
-    settings: dict[str, Any],
-    uninstall: bool,
-    host: Any,
-    root: str | None = None,
-    owned_records: list[dict[str, Any]] | None = None,
-    allow_legacy: bool = False,
-) -> dict[str, Any]:
-    """Merge/remove this suite's handlers without claiming the config file."""
-    adapter = for_host(host)
-    if host.id == "cursor" and allow_legacy:
-        _migrate_cursor_grouped(settings, host, root)
-    # Migrate old pre-adapter Codex output that put events at the JSON root.  Only exact
-    # manifest definitions or exact published command forms are eligible.
-    if host.id == "codex":
-        old_root_specs = list(adapter.specs())
-        # The pre-adapter installer placed absence on PostToolUse.  It is an exact
-        # migration candidate, never a reason to remove an arbitrary PostToolUse entry.
-        old_root_specs.append(("PostToolUse", "write", "absence_claim_guard.py", 10))
-        for canonical_event, _matcher_value, script, _timeout in old_root_specs:
-            if canonical_event not in settings:
-                continue
-            cleaned = _strip_script(
-                settings.get(canonical_event),
-                host,
-                script,
-                event=canonical_event,
-                owned_records=owned_records,
-                root=root,
-                allow_legacy=allow_legacy,
-            )
-            if cleaned:
-                settings[canonical_event] = cleaned
-            else:
-                settings.pop(canonical_event, None)
-
-    container = _container(settings, host, create=not uninstall)
-    if container is None:
-        return settings
-
-    for canonical_event, matcher, script, timeout in adapter.specs():
-        event = adapter.event(canonical_event)
-        current = container.get(event)
-        entries = _strip_script(
-            current,
-            host,
-            script,
-            event=event,
-            owned_records=owned_records,
-            root=root,
-            allow_legacy=allow_legacy,
-        )
-        if not uninstall:
-            conditions = _CLAUDE_CONDITIONS.get(script, ()) if host.id == "claude" else ()
-            definitions = [
-                handler_definition(host, matcher, script, timeout, condition, root)
-                for condition in (conditions or (None,))
-            ]
-            if adapter.style == "direct":
-                entries.extend(definitions)
-            else:
-                group: dict[str, Any] = {"hooks": definitions}
-                match = _matcher(host, matcher)
-                if match is not None:
-                    group["matcher"] = match
-                entries.append(group)
-        if entries:
-            container[event] = entries
-        else:
-            container.pop(event, None)
-
-    if not uninstall:
-        for key, value in adapter.config_extra:
-            settings.setdefault(key, value)
-
-    if adapter.nested and not container:
-        settings.pop("hooks", None)
-    return settings
-
-
-def _iter_event_handlers(
-    settings: dict[str, Any], host: Any, event: str
-) -> Iterable[tuple[dict[str, Any], object]]:
-    adapter = for_host(host)
-    container = _container(settings, host)
-    if not isinstance(container, dict):
-        return ()
-    entries = container.get(event)
-    if not isinstance(entries, list):
-        return ()
-    out: list[tuple[dict[str, Any], object]] = []
-    for entry in entries:
-        if adapter.style == "direct":
-            if isinstance(entry, dict):
-                out.append((entry, entry.get("matcher")))
-        elif isinstance(entry, dict) and isinstance(entry.get("hooks"), list):
-            out.extend(
-                (item, entry.get("matcher"))
-                for item in entry["hooks"]
-                if isinstance(item, dict)
-            )
-    return tuple(out)
+    value = cleaned.get("hooks", {}).get(event or "PreToolUse", {})
+    return (
+        value.get("hooks", [])
+        if isinstance(value, dict)
+        else value
+        if isinstance(value, list)
+        else []
+    )
 
 
 def handler_records(
     settings: dict[str, Any], host: Any, root: str | None = None
 ) -> list[dict[str, Any]]:
-    """Return only complete generated handler fingerprints."""
-    adapter = for_host(host)
+    """Describe exact old generated handlers for migration diagnostics."""
     records: list[dict[str, Any]] = []
-    for canonical_event, _matcher_value, script, _timeout in adapter.specs():
-        event = adapter.event(canonical_event)
-        for item, group_matcher in _iter_event_handlers(settings, host, event):
-            # A command path is only a candidate.  Ownership requires the complete
-            # generated definition, including the host/event/group matcher, timeout,
-            # and Claude condition.  This keeps same-command foreign handlers out of
-            # the manifest and therefore out of later reinstall/uninstall mutations.
-            if not _current_match(
-                item, host, event, script, root, group_matcher=group_matcher
-            ):
-                continue
-            records.append(
-                {
-                    "event": event,
-                    "script": script,
-                    "command": str(item.get("command", "")),
-                    "matcher": item.get("matcher", group_matcher),
-                    "timeout": item.get("timeout"),
-                    "definition": deepcopy(item),
-                }
-            )
+    for event, _wrapper_or_entry, handler, wrapper in _iter_handlers(settings, host):
+        script = exact_script(handler.get("command"), host, root)
+        if script is None:
+            continue
+        record: dict[str, Any] = {
+            "event": event,
+            "script": script,
+            "command": handler.get("command"),
+            "matcher": handler.get("matcher", wrapper.get("matcher") if wrapper else None),
+            "timeout": handler.get("timeout"),
+            "definition": copy.deepcopy(handler),
+        }
+        if wrapper is not None:
+            record["wrapper"] = {
+                key: copy.deepcopy(value)
+                for key, value in wrapper.items()
+                if key != "hooks"
+            }
+        records.append(record)
     return records
 
 
 def all_config_commands(settings: object) -> list[str]:
-    """Return command strings in a config, including old Codex root-event layouts."""
     out: list[str] = []
 
     def visit(value: object) -> None:
@@ -762,115 +771,27 @@ def all_config_commands(settings: object) -> list[str]:
             command = value.get("command")
             if isinstance(command, str):
                 out.append(command)
-            for nested in value.values():
-                visit(nested)
+            for item in value.values():
+                visit(item)
         elif isinstance(value, list):
-            for nested in value:
-                visit(nested)
+            for item in value:
+                visit(item)
 
     visit(settings)
     return out
 
 
 def validate_config(settings: object, host: Any, root: str | None = None) -> list[str]:
-    """Validate the actual host shape, not a string search through JSON text."""
-    adapter = for_host(host)
-    errors: list[str] = []
-    if not isinstance(settings, dict):
-        return ["config is not a JSON object"]
-    if adapter.nested:
-        container = settings.get("hooks")
-        if not isinstance(container, dict):
-            errors.append("missing top-level hooks object")
-            return errors
-    else:
-        container = settings
-    if adapter.style == "direct" and not (
-        type(settings.get("version", 1)) is int and settings.get("version", 1) == 1
-    ):
-        errors.append("Cursor hooks.json version must be 1 when explicitly present")
-    if host.id == "codex":
-        root_events = {name for name, *_rest in adapter.specs() if name in settings}
-        if root_events:
-            errors.append("Codex events must be under top-level hooks, not at root")
+    """Validate only that an existing JSON value is an object.
 
-    for canonical_event, matcher, script, _timeout in adapter.specs():
-        event = adapter.event(canonical_event)
-        entries = container.get(event)
-        if not isinstance(entries, list):
-            errors.append(f"missing {event} handler list")
-            continue
-        found = False
-        for entry in entries:
-            if adapter.style == "direct":
-                if not isinstance(entry, dict) or "hooks" in entry:
-                    if isinstance(entry, dict) and "hooks" in entry:
-                        errors.append(f"{event} uses Claude hooks wrapper")
-                    continue
-                handler_list = [entry]
-                group_matcher = entry.get("matcher")
-            else:
-                if not isinstance(entry, dict) or not isinstance(entry.get("hooks"), list):
-                    continue
-                handler_list = entry["hooks"]
-                group_matcher = entry.get("matcher")
-            for handler in handler_list:
-                if not isinstance(handler, dict):
-                    continue
-                if (
-                    script_for_command(
-                        handler.get("command"),
-                        host,
-                        root,
-                        allow_absolute_without_root=root is None,
-                    )
-                    != script
-                ):
-                    continue
-                found = True
-                if not isinstance(handler.get("command"), str):
-                    errors.append(f"{event}/{script} has no command")
-                if adapter.style == "grouped" and handler.get("type") != "command":
-                    errors.append(f"{event}/{script} is missing type=command")
-                if adapter.style == "direct":
-                    extra = set(handler) - {"command", "matcher", "timeout"}
-                    if extra:
-                        errors.append(
-                            f"{event}/{script} has Cursor-only unknown fields: "
-                            + ", ".join(sorted(extra))
-                        )
-                if root is not None and handler.get("command") != command_for(
-                    host, script, root
-                ):
-                    errors.append(
-                        f"{event}/{script} command is not the installed root/profile"
-                    )
-                effective_matcher = handler.get("matcher", group_matcher)
-                if matcher is not None and effective_matcher is not None:
-                    tools = getattr(host, "write_tools", ()) or ()
-                    if tools and not any(tool in str(effective_matcher) for tool in tools):
-                        errors.append(
-                            f"{event}/{script} matcher does not cover write tools"
-                        )
-                if not isinstance(handler.get("timeout"), int):
-                    errors.append(f"{event}/{script} has no integer timeout")
-        if not found:
-            errors.append(f"missing {event}/{script}")
-    return errors
+    Runtime hook shape is intentionally no longer a package contract.  This helper is
+    retained for callers inspecting old configs and never creates or requires handlers.
+    """
+    return [] if isinstance(settings, dict) else ["config is not a JSON object"]
 
 
 def caveat(host: Any) -> str:
-    adapter = for_host(host)
-    notes: list[str] = []
-    if adapter.omitted_events():
-        notes.append(
-            "degraded: unsupported hook events omitted ("
-            + ", ".join(adapter.omitted_events())
-            + ")"
-        )
-    if host.id == "pi":
-        notes.append(
-            "configured-but-inactive until `pi install npm:@hsingjui/pi-hooks`; "
-            "this installer cannot confirm that the Pi extension is loaded."
-        )
-    return " ".join(notes)
+    return (
+        "runtime governance hooks are not installed; invoke research skills and "
+        "checks explicitly"
+    )

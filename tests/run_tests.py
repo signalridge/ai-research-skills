@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Stdlib regression suite for ai-research-skills.
+"""Stdlib regression tests for the standalone ai-research-skills toolbox.
 
-The tests exercise the host adapters, payload parser, ownership transaction and the
-phase-aware validator.  The validator is deliberately run once with its development
-libraries and once through the bundled fallback profile.
+The suite intentionally tests the public behavior that matters without importing optional
+validation dependencies.  The bundled linter is also exercised through its fallback mode so
+``python3`` remains enough for an installed project.
 """
 
 from __future__ import annotations
@@ -14,15 +14,12 @@ import pathlib
 import subprocess
 import sys
 import tempfile
-import threading
-from typing import Any
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
 ASSETS = SRC / "ai_research_skills" / "assets"
-HOOKS = ASSETS / "hooks"
-VALIDATE = ASSETS / "scripts" / "rs_validate.py"
 INSTALL = ROOT / "install.py"
+VALIDATE = ASSETS / "scripts" / "rs_validate.py"
 EXAMPLE = (
     ROOT
     / "examples"
@@ -31,7 +28,6 @@ EXAMPLE = (
     / "survey"
     / "retrieval-augmented-agents"
 )
-BROKEN = ROOT / "tests" / "fixtures" / "broken-survey"
 
 sys.path.insert(0, str(SRC))
 
@@ -49,955 +45,1164 @@ def check(name: str, condition: bool, detail: str = "") -> None:
         print(f"  FAIL {name}" + (f" — {detail}" if detail else ""))
 
 
-def run_hook(
-    name: str, payload: object, *, host: str | None = None
-) -> tuple[int, str, str]:
-    value = payload if isinstance(payload, str) else json.dumps(payload)
-    command = [sys.executable, str(HOOKS / name)]
-    if host:
-        command += ["--host", host]
-    result = subprocess.run(
-        command,
-        input=value,
-        text=True,
-        capture_output=True,
-    )
-    return result.returncode, result.stdout.strip(), result.stderr.strip()
-
-
-def decision(stdout: str) -> str:
-    if not stdout:
-        return "silent"
-    try:
-        data = json.loads(stdout)
-    except json.JSONDecodeError:
-        return "malformed"
-    if (data.get("hookSpecificOutput") or {}).get("permissionDecision") == "deny":
-        return "deny"
-    if data.get("permission") == "deny":
-        return "deny"
-    if data.get("decision") == "block":
-        return "block"
-    if data.get("systemMessage"):
-        return "warn"
-    return "other"
-
-
 def run_validator(
     directory: pathlib.Path,
     *,
     fallback: bool = False,
-    isolated: bool = False,
     strict: bool = False,
+    profile: str | None = None,
 ) -> tuple[int, str]:
     env = dict(os.environ)
     if fallback:
         env["ARS_FORCE_FALLBACK"] = "1"
-    command = [sys.executable]
-    if isolated:
-        command += ["-I", "-S"]
-    command += [str(VALIDATE)]
+    command = [sys.executable, str(VALIDATE)]
     if strict:
         command.append("--strict")
+    if profile:
+        command += ["--profile", profile]
     command.append(str(directory))
     result = subprocess.run(command, text=True, capture_output=True, env=env)
     return result.returncode, result.stdout + result.stderr
 
 
-# --------------------------------------------------------------------------- hooks
+def test_version_and_assets() -> None:
+    print("\nversion and asset contract")
+    from ai_research_skills import __version__, hosts, installer
 
-
-def test_payload_and_hooks() -> None:
-    print("\nhooks and payloads")
-    sys.path.insert(0, str(HOOKS))
-    import _payload
-
-    pi_write = {"path": "notes/a.md", "content": "hello"}
-    pi_edit = {"path": "notes/a.md", "edits": [{"newText": "one"}, {"newText": "two"}]}
-    check("Pi path/content payload", _payload.operations(pi_write)[0].text == "hello")
-    check("Pi edit newText payload", _payload.operations(pi_edit)[0].text == "one\ntwo")
+    check("release version is 0.8.0", __version__ == "0.8.0")
+    check("installer version is 0.8.0", installer.__version__ == "0.8.0")
     check(
-        "Claude file_path/new_string remain supported",
-        _payload.targets({"file_path": "a.md", "new_string": "x"}) == ["a.md"],
+        "all registered hosts are skills-only", all(not host.hooks for host in hosts.HOSTS)
     )
-
-    patch = """*** Begin Patch
-*** Add File: first.bib
-+@article{first2025x, title={First}}
-*** Update File: second.md
-+no prior work has done this.
-*** Update File: old.md
-+@article{not-a-bib-entry, title={No}}
-*** Move to: moved.md
-*** End Patch"""
-    operations = _payload.operations({"command": patch})
-    check(
-        "apply_patch parses Add/Update/Move operations",
-        [op.path for op in operations] == ["first.bib", "second.md", "moved.md"],
-    )
-    check(
-        "multi-file patch text is isolated",
-        operations[0].text.startswith("@article")
-        and "no prior" not in operations[0].text
-        and operations[1].text.startswith("no prior"),
-    )
-    check(
-        "Move keeps source for comparison",
-        operations[-1].old_path == "old.md" and operations[-1].text.startswith("@article"),
-    )
-
     with tempfile.TemporaryDirectory() as raw:
-        root = pathlib.Path(raw)
-        survey = root / ".research" / "survey" / "demo"
-        survey.mkdir(parents=True)
-        (survey / "gaps.yml").write_text(
-            "gaps:\n  - id: G1\n    evidence_of_absence:\n      queries_run:\n        - a\n"
-        )
-        payload = {
-            "cwd": raw,
-            "tool_input": {
-                "command": "*** Begin Patch\n*** Update File: safe.py\n+ok\n*** Update File: claim.md\n+No prior work exists here.\n*** End Patch"
-            },
-        }
-        rc, out, _err = run_hook("absence_claim_guard.py", payload)
+        host = hosts.lookup("claude")
+        assert host is not None
+        desired = installer._desired_files(raw, host)
         check(
-            "guard visits every patch operation",
-            rc == 0 and decision(out) in ("block", "deny"),
-        )
-        gap_path = survey / "gaps.yml"
-        claim = {
-            "cwd": raw,
-            "tool_input": {"path": "claim.md", "content": "No prior work exists here."},
-        }
-        gap_path.write_text(
-            "gaps:\n"
-            "  - id: G1\n"
-            "    evidence_of_absence:\n"
-            "      queries_run:\n"
-            '        - "Same query"\n'
-            "        - same   query\n"
-            "        - SAME QUERY\n"
-        )
-        rc, out, _err = run_hook("absence_claim_guard.py", claim)
-        check(
-            "absence guard denies three duplicated normalized queries",
-            rc == 0 and decision(out) in ("block", "deny"),
-        )
-        gap_path.write_text(
-            "gaps:\n"
-            "  - id: G1\n"
-            "    evidence_of_absence:\n"
-            "      queries_run:\n"
-            "        - first phrasing\n"
-            "        - second phrasing\n"
-            "        - third phrasing\n"
-        )
-        rc, out, _err = run_hook("absence_claim_guard.py", claim)
-        check("absence guard accepts three distinct queries", rc == 0 and not out)
-        gap_path.write_text(
-            "gaps:\n  - id: G1\n    evidence_of_absence:\n      queries_run:\n        - a\n"
+            "legacy hook source remains outside desired files",
+            not any("/hooks/" in path for path in desired),
         )
 
-        bib = survey / "refs.bib"
-        corpus = survey / "corpus.jsonl"
-        corpus.write_text(
-            json.dumps({"key": "first2025x", "id": "arXiv:2500.00001"}) + "\n"
-        )
-        strict = "% rs-provenance: key=first2025x id=arXiv:2500.00001 tool=arxiv.export_citations date=2026-08-03\n@article{first2025x, title={First}}\n"
-        rc, out, _err = run_hook(
-            "bib_provenance_guard.py",
-            {"cwd": raw, "tool_input": {"path": str(bib), "content": strict}},
-        )
-        check("strict per-entry BibTeX attestation passes", rc == 0 and not out)
-        directives = (
-            "@STRING{venue = {Example}}\n"
-            '@Preamble("generated")\n'
-            "@COMMENT{directive is not a citation}\n"
-            "% rs-provenance: key=first2025x id=arXiv:2500.00001 tool=t date=2026-08-03\n"
-            "@ARTICLE(first2025x, title={First})\n"
-        )
-        rc, out, _err = run_hook(
-            "bib_provenance_guard.py",
-            {"cwd": raw, "tool_input": {"path": str(bib), "content": directives}},
-        )
+    skill_root = ASSETS / "skills"
+    command_root = ASSETS / "commands"
+    forbidden = (
+        "disallowed-tools",
+        "cannot advance",
+        "read-only projection",
+        "only skill permitted",
+        "mandatory recall",
+        "readiness floor",
+    )
+    for path in sorted(skill_root.glob("*/SKILL.md")) + sorted(command_root.glob("*.md")):
+        text = path.read_text()
+        check(f"{path.relative_to(ROOT)} is user-invoked", "user" in text.lower())
+        for phrase in forbidden:
+            check(f"{path.relative_to(ROOT)} omits {phrase!r}", phrase not in text.lower())
         check(
-            "BibTeX directives are ignored case-insensitively by guard",
-            rc == 0 and not out,
+            f"{path.relative_to(ROOT)} disables model auto-invocation",
+            "disable-model-invocation: true" in text,
         )
-        parenthesized = "@article(first2025x, title={Unattested})\n"
-        rc, out, _err = run_hook(
-            "bib_provenance_guard.py",
-            {"cwd": raw, "tool_input": {"path": str(bib), "content": parenthesized}},
-        )
-        check(
-            "parenthesized BibTeX entry still requires attestation",
-            rc == 0 and decision(out) == "deny",
-        )
-        legacy = "% rs-provenance: tool=old date=2026-08-03\n@article{first2025x, title={First}}\n@article{new2025x, title={New}}\n"
-        rc, out, _err = run_hook(
-            "bib_provenance_guard.py",
-            {"cwd": raw, "tool_input": {"path": str(bib), "content": legacy}},
-        )
-        check(
-            "legacy file header cannot authorise append",
-            rc == 0 and decision(out) == "deny",
-        )
-
-        # Host stdout is a contract, not a union of permissive-looking fields.  Codex
-        # fixtures reject every Cursor top-level key; Cursor rejects hookSpecificOutput.
-        bad_bib = {
-            "cwd": raw,
-            "tool_input": {"path": str(bib), "content": "@article{new2025x, title={New}}"},
-        }
-        for profile, expected in (
-            ("claude", {"hookSpecificOutput"}),
-            ("pi", {"hookSpecificOutput"}),
-            ("codex", {"hookSpecificOutput"}),
-            ("cursor", {"permission", "user_message", "agent_message"}),
-        ):
-            rc, out, _err = run_hook("bib_provenance_guard.py", bad_bib, host=profile)
-            data = json.loads(out)
-            check(
-                f"{profile} deny stdout uses exact profile schema",
-                rc == 0 and set(data) == expected,
-            )
-            if profile == "codex":
-                check(
-                    "Codex deny fixture contains no Cursor fields",
-                    not ({"permission", "user_message", "agent_message"} & set(data)),
-                )
-
-        claim_payload = {
-            "cwd": raw,
-            "tool_input": {"path": "draft.md", "content": "No prior work exists here."},
-        }
-        for profile, expected in (
-            ("claude", {"decision", "reason"}),
-            ("pi", {"decision", "reason"}),
-            ("codex", {"hookSpecificOutput"}),
-            ("cursor", {"permission", "user_message", "agent_message"}),
-        ):
-            rc, out, _err = run_hook("absence_claim_guard.py", claim_payload, host=profile)
-            check(
-                f"{profile} absence response is host-valid",
-                rc == 0 and set(json.loads(out)) == expected,
-            )
-
-        (survey / "protocol.yml").write_text("topic: demo\nlast_searched_at: 2000-01-01\n")
-        for profile, expected in (
-            ("claude", {"hookSpecificOutput"}),
-            ("pi", {"hookSpecificOutput"}),
-            ("codex", {"hookSpecificOutput"}),
-            ("cursor", {"additional_context"}),
-        ):
-            rc, out, _err = run_hook("survey_staleness.py", {"cwd": raw}, host=profile)
-            check(
-                f"{profile} SessionStart response uses actual schema",
-                rc == 0 and set(json.loads(out)) == expected,
-            )
-
-        # A corpus belongs to the refs.bib directory.  A key in a different survey must
-        # not authorize this one, and a duplicate local key is not resolved by last-write.
-        other = root / ".research" / "survey" / "other"
-        other.mkdir(parents=True)
-        (other / "corpus.jsonl").write_text(
-            json.dumps({"key": "foreign2025x", "id": "arXiv:2500.00002"}) + "\n"
-        )
-        cross = "% rs-provenance: key=foreign2025x id=arXiv:2500.00002 tool=t date=2026-08-03\n@article{foreign2025x, title={Foreign}}\n"
-        rc, out, _err = run_hook(
-            "bib_provenance_guard.py",
-            {"cwd": raw, "tool_input": {"path": str(bib), "content": cross}},
-        )
-        check(
-            "foreign survey corpus cannot authorize refs",
-            rc == 0 and decision(out) == "deny",
-        )
-        corpus.write_text(
-            json.dumps({"key": "first2025x", "id": "one"})
-            + "\n"
-            + json.dumps({"key": "first2025x", "id": "two"})
-            + "\n"
-        )
-        rc, out, _err = run_hook(
-            "bib_provenance_guard.py",
-            {"cwd": raw, "tool_input": {"path": str(bib), "content": strict}},
-        )
-        check(
-            "duplicate corpus key cannot authorize refs",
-            rc == 0 and decision(out) == "deny",
-        )
-
-        old_bib = root / "old.bib"
-        old_bib.write_text("@article{move2025x, title={Old}}\n")
-        partial_move = "*** Begin Patch\n*** Update File: old.bib\n@@\n- title={Old}\n+ title={New}\n*** Move to: moved.bib\n*** End Patch"
-        rc, out, _err = run_hook(
-            "bib_provenance_guard.py", {"cwd": raw, "tool_input": {"command": partial_move}}
-        )
-        check(
-            "partial BibTeX move is conservatively denied",
-            rc == 0 and decision(out) == "deny",
-        )
-        full_move = "*** Begin Patch\n*** Update File: old.bib\n+% rs-provenance: key=move2025x id=arXiv:2500.00003 tool=t date=2026-08-03\n+@article{move2025x, title={New}}\n*** Move to: moved.bib\n*** End Patch"
-        (root / ".research" / "survey" / "demo" / "corpus.jsonl").write_text(
-            json.dumps({"key": "move2025x", "id": "arXiv:2500.00003"}) + "\n"
-        )
-        rc, out, _err = run_hook(
-            "bib_provenance_guard.py", {"cwd": raw, "tool_input": {"command": full_move}}
-        )
-        check("complete BibTeX move can be attested", rc == 0 and not out)
-        duplicate_bib = "% rs-provenance: key=first2025x id=arXiv:2500.00001 tool=t date=2026-08-03\n@article{first2025x, title={One}}\n@article{first2025x, title={Two}}\n"
-        rc, out, _err = run_hook(
-            "bib_provenance_guard.py",
-            {"cwd": raw, "tool_input": {"path": str(bib), "content": duplicate_bib}},
-        )
-        check(
-            "two BibTeX entries with one attestation fail",
-            rc == 0 and decision(out) == "deny",
-        )
-
-    for name in (
-        "bib_provenance_guard.py",
-        "absence_claim_guard.py",
-        "survey_staleness.py",
-        "stop_survey_peer.py",
+    for path in (
+        ROOT / "README.md",
+        ROOT / "docs" / "DESIGN.md",
+        ROOT / "docs" / "SETUP.md",
     ):
-        rc, out, _err = run_hook(name, "{not json")
-        check(
-            f"{name} fails open on malformed input", rc == 0 and decision(out) == "silent"
-        )
+        text = path.read_text().lower()
+        for phrase in forbidden:
+            check(f"{path.relative_to(ROOT)} omits {phrase!r}", phrase not in text)
+    check("lint command is packaged", (command_root / "ars-lint.md").is_file())
 
 
-# --------------------------------------------------------------------------- installer and host adapters
-
-
-def test_installer() -> None:
-    print("\ninstaller and host adapters")
-    from ai_research_skills import hook_adapters, hosts, installer
-
+def test_linter_scope() -> None:
+    print("\nscoped optional linter")
     with tempfile.TemporaryDirectory() as raw:
         root = pathlib.Path(raw)
-        (root / ".codex").mkdir()
-        (root / ".cursor").mkdir()
-        (root / ".codex" / "hooks.json").write_text(
+        empty = root / "empty"
+        empty.mkdir()
+        rc, out = run_validator(empty, fallback=True)
+        check("empty optional workspace passes", rc == 0 and "none" in out, out)
+
+        sparse = root / "sparse"
+        sparse.mkdir()
+        (sparse / "protocol.yml").write_text("topic: small\nphase: 0\n")
+        rc, out = run_validator(sparse, fallback=True)
+        check("protocol-only legacy phase is accepted", rc == 0, out)
+
+        empty_protocol = root / "empty-protocol"
+        empty_protocol.mkdir()
+        (empty_protocol / "protocol.yml").write_text("\n")
+        rc, out = run_validator(empty_protocol, fallback=True)
+        check(
+            "present empty protocol fails instead of looking absent",
+            rc != 0 and "empty/null" in out,
+            out,
+        )
+
+        sparse_corpus = root / "sparse-corpus"
+        sparse_corpus.mkdir()
+        (sparse_corpus / "corpus.jsonl").write_text(
+            json.dumps({"key": "paper-without-provenance"}) + "\n"
+        )
+        rc, out = run_validator(sparse_corpus, fallback=True)
+        strict_rc, _strict_out = run_validator(sparse_corpus, fallback=True, strict=True)
+        check(
+            "missing corpus found_via is a warning",
+            rc == 0 and strict_rc != 0 and "WARN" in out and "found_via" in out,
+            out,
+        )
+        (sparse_corpus / "corpus.jsonl").write_text(
+            json.dumps({"key": "bad-provenance", "found_via": None}) + "\n"
+        )
+        check(
+            "malformed supplied corpus provenance is an error",
+            run_validator(sparse_corpus, fallback=True)[0] != 0,
+        )
+        rc, out = run_validator(sparse, fallback=True, profile="decision-brief")
+        check(
+            "deprecated profile adds no prerequisite",
+            rc == 0 and "prerequisite" in out.lower(),
+            out,
+        )
+
+        partial = root / "partial"
+        partial.mkdir()
+        (partial / "protocol.yml").write_text(
+            "topic: partial\ncreated: 2026-08-01\nphase: 5\n"
+        )
+        (partial / "corpus.jsonl").write_text(
             json.dumps(
                 {
-                    "description": "foreign description",
+                    "key": "paper2025x",
+                    "title": "Paper",
+                    "id": "doi:example/1",
+                    "found_via": ["manual:user-supplied"],
+                    "accessed": "2026-08-01",
+                }
+            )
+            + "\n"
+        )
+        rc, out = run_validator(partial, fallback=True)
+        check("partial corpus does not need future artifacts", rc == 0, out)
+
+        broken = root / "broken"
+        broken.mkdir()
+        (broken / "corpus.jsonl").write_text(
+            json.dumps({"key": "same", "id": "doi:one", "found_via": ["manual:x"]})
+            + "\n"
+            + json.dumps(
+                {
+                    "key": "same",
+                    "id": "doi:one",
+                    "found_via": ["manual:y"],
+                    "corroboration": {"agrees_with": ["missing"]},
+                }
+            )
+            + "\n"
+        )
+        rc, out = run_validator(broken, fallback=True)
+        check(
+            "duplicate keys and dangling references fail",
+            rc != 0 and "duplicate" in out and "missing" in out,
+            out,
+        )
+
+        refs = root / "refs"
+        refs.mkdir()
+        (refs / "corpus.jsonl").write_text(
+            json.dumps(
+                {"key": "paper2025x", "id": "doi:example/1", "found_via": ["manual:x"]}
+            )
+            + "\n"
+        )
+        (refs / "refs.bib").write_text("@article{paper2025x, title={Paper}}\n")
+        rc, out = run_validator(refs, fallback=True)
+        strict_rc, _strict_out = run_validator(refs, fallback=True, strict=True)
+        check(
+            "missing BibTeX provenance is a visible warning",
+            rc == 0 and "provenance" in out,
+            out,
+        )
+        check("strict mode can elevate the warning", strict_rc != 0)
+
+        coverage_only = root / "coverage-only"
+        coverage_only.mkdir()
+        (coverage_only / "coverage.yml").write_text(
+            "cells:\n  - occupants: [missing-paper]\n    gap_id: missing-gap\n"
+        )
+        rc, out = run_validator(coverage_only, fallback=True)
+        check(
+            "coverage-only subset warns instead of failing unresolved companions",
+            rc == 0 and "absent" in out,
+            out,
+        )
+
+        gaps_only = root / "gaps-only"
+        gaps_only.mkdir()
+        (gaps_only / "gaps.yml").write_text(
+            "gaps:\n  - id: gap-one\n    closes_if_met:\n      key: missing-paper\n"
+        )
+        rc, out = run_validator(gaps_only, fallback=True)
+        check(
+            "gaps-only subset warns instead of failing absent corpus",
+            rc == 0 and "absent" in out,
+            out,
+        )
+
+        refs_only = root / "refs-only"
+        refs_only.mkdir()
+        (refs_only / "refs.bib").write_text(
+            "@article{paper, title={Paper}}\n"
+            "% rs-provenance: key=paper id=doi:paper tool=manual date=2026-08-01\n"
+        )
+        rc, out = run_validator(refs_only, fallback=True)
+        check(
+            "refs-only subset warns instead of failing absent corpus",
+            rc == 0 and "absent" in out,
+            out,
+        )
+
+        malformed_subset = root / "malformed-subset"
+        malformed_subset.mkdir()
+        (malformed_subset / "coverage.yml").write_text("cells: not-a-list\n")
+        check(
+            "malformed present optional artifact still fails",
+            run_validator(malformed_subset, fallback=True)[0] != 0,
+        )
+
+    check(
+        "worked example passes fallback linter",
+        run_validator(EXAMPLE, fallback=True)[0] == 0,
+    )
+
+
+def test_optional_evidence_and_host_selection() -> None:
+    print("\noptional evidence fields and doctor host selection")
+    from ai_research_skills import installer
+
+    with tempfile.TemporaryDirectory() as raw:
+        root = pathlib.Path(raw)
+
+        legacy = root / "legacy-corpus"
+        legacy.mkdir()
+        (legacy / "corpus.jsonl").write_text(
+            json.dumps(
+                {
+                    "key": "legacy-number",
+                    "found_via": ["manual:test"],
+                    "numbers": [
+                        {"value": "6.2 EM", "source": "Table 3, p.7", "looked_at": True}
+                    ],
+                }
+            )
+            + "\n"
+        )
+        rc, out = run_validator(legacy, fallback=True)
+        check("legacy corpus and number fields still pass", rc == 0, out)
+
+        valid_locator = root / "valid-locator"
+        valid_locator.mkdir()
+        (valid_locator / "corpus.jsonl").write_text(
+            json.dumps(
+                {
+                    "key": "located",
+                    "found_via": ["manual:test"],
+                    "claim": "A located claim",
+                    "claim_locator": {
+                        "kind": "section",
+                        "value": "4.1",
+                        "detail": "methods",
+                        "extension": "kept",
+                    },
+                    "numbers": [
+                        {
+                            "value": "6.2 EM",
+                            "source": "Table 3",
+                            "looked_at": True,
+                            "locator": {"kind": "table", "value": "3", "detail": "p.7"},
+                        }
+                    ],
+                }
+            )
+            + "\n"
+        )
+        rc, out = run_validator(valid_locator, fallback=True)
+        check("valid claim and number locators pass", rc == 0, out)
+        (valid_locator / "corpus.jsonl").write_text(
+            json.dumps(
+                {
+                    "key": "bad-locator",
+                    "found_via": ["manual:test"],
+                    "claim_locator": {"kind": "page", "value": ""},
+                }
+            )
+            + "\n"
+        )
+        rc, out = run_validator(valid_locator, fallback=True)
+        check(
+            "empty supplied locator value fails clearly",
+            rc != 0 and "claim_locator" in out,
+            out,
+        )
+        (valid_locator / "corpus.jsonl").write_text(
+            json.dumps(
+                {
+                    "key": "bad-number-locator",
+                    "found_via": ["manual:test"],
+                    "numbers": [{"value": "1", "locator": {"kind": "table"}}],
+                }
+            )
+            + "\n"
+        )
+        rc, out = run_validator(valid_locator, fallback=True)
+        check(
+            "number locator missing value fails clearly",
+            rc != 0 and "numbers/0/locator" in out,
+            out,
+        )
+
+        status = root / "search-status"
+        status.mkdir()
+        (status / "protocol.yml").write_text(
+            "search:\n"
+            "  status: success_no_hits\n"
+            "  backend: test-backend\n"
+            "  queries: [first query, second query]\n"
+            "  note: completed without matches\n"
+        )
+        rc, out = run_validator(status, fallback=True)
+        check("valid optional search status passes", rc == 0, out)
+        (status / "protocol.yml").write_text("search:\n  status: not-a-search-state\n")
+        rc, out = run_validator(status, fallback=True)
+        check(
+            "invalid optional search status fails", rc != 0 and "search/status" in out, out
+        )
+
+        refs = root / "both-identifiers"
+        refs.mkdir()
+        (refs / "corpus.jsonl").write_text(
+            json.dumps(
+                {
+                    "key": "both-ids",
+                    "id": "doi:example/1",
+                    "openalex_id": "W123",
+                    "found_via": ["manual:test"],
+                }
+            )
+            + "\n"
+        )
+        refs_path = refs / "refs.bib"
+        refs_path.write_text(
+            "@article{both-ids, title={Both identifiers}}\n"
+            "% rs-provenance: key=both-ids id=W123 tool=manual date=2025-01-01\n"
+        )
+        rc, out = run_validator(refs, fallback=True)
+        check("OpenAlex provenance identifier is accepted", rc == 0, out)
+        refs_path.write_text(refs_path.read_text().replace("id=W123", "id=doi:example/1"))
+        rc, out = run_validator(refs, fallback=True)
+        check("DOI provenance identifier is also accepted", rc == 0, out)
+        refs_path.write_text(refs_path.read_text().replace("id=doi:example/1", "id=other"))
+        rc, out = run_validator(refs, fallback=True)
+        check(
+            "unmatched provenance identifier still fails",
+            rc != 0 and "does not match" in out,
+            out,
+        )
+
+    with tempfile.TemporaryDirectory() as raw:
+        root = pathlib.Path(raw)
+        (root / ".claude").mkdir()
+        selected_calls: list[tuple[str, ...]] = []
+        real_selected = installer._selected
+        real_recover = installer._recover_journal
+
+        def record_selected(
+            path: str, requested: str | None
+        ) -> tuple[tuple[object, ...], int]:
+            chosen, rc = real_selected(path, requested)
+            selected_calls.append(tuple(host.id for host in chosen))
+            return chosen, rc
+
+        def replace_detected_host(path: str) -> None:
+            (pathlib.Path(path) / ".claude").rename(pathlib.Path(path) / ".cursor")
+
+        installer._selected = record_selected  # type: ignore[assignment]
+        installer._recover_journal = replace_detected_host  # type: ignore[assignment]
+        try:
+            result = installer.doctor(raw)
+        finally:
+            installer._selected = real_selected
+            installer._recover_journal = real_recover
+        check(
+            "doctor resolves auto host after recovery state changes",
+            result != 0 and selected_calls == [("cursor",)],
+            f"result={result}, calls={selected_calls}",
+        )
+
+
+def _manifest_with_legacy_hook(
+    root: pathlib.Path, host_id: str, *, timeout: int = 10, modified_file: bool = False
+) -> tuple[pathlib.Path, pathlib.Path]:
+    from ai_research_skills import hook_adapters, hosts, installer
+
+    host = hosts.lookup(host_id)
+    assert host is not None
+    script = "bib_provenance_guard.py"
+    hook = root / host.ownership_root / "hooks" / script
+    hook.parent.mkdir(parents=True, exist_ok=True)
+    hook.write_text("legacy hook")
+    command = hook_adapters.command_for(host, script, str(root))
+    settings_path = root / host.ownership_root / host.hooks_file
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
+    settings_path.write_text(
+        json.dumps(
+            {
+                "foreign_top": {"keep": True},
+                "hooks": {
+                    "PreToolUse": [
+                        {
+                            "matcher": "Write|Edit",
+                            "hooks": [
+                                {
+                                    "type": "command",
+                                    "command": command,
+                                    "timeout": timeout,
+                                },
+                                {"type": "command", "command": "foreign", "timeout": 1},
+                            ],
+                        }
+                    ]
+                },
+            }
+        )
+    )
+    manifest_path = root / installer.MANIFEST_REL
+    manifest = json.loads(manifest_path.read_text())
+    record = manifest["hosts"][host.id]
+    record["config"] = f"{host.ownership_root}/{host.hooks_file}"
+    record["files"][f"{host.ownership_root}/hooks/{script}"] = installer._sha256(
+        hook.read_bytes()
+    )
+    record["handlers"] = [
+        {
+            "event": "PreToolUse",
+            "script": script,
+            "command": command,
+            "matcher": "Write|Edit",
+            "timeout": 10,
+            "definition": {"type": "command", "command": command, "timeout": 10},
+        }
+    ]
+    manifest_path.write_text(
+        json.dumps(
+            installer._seal_manifest(
+                {key: value for key, value in manifest.items() if key != "manifest_sha256"}
+            )
+        )
+    )
+    if modified_file:
+        hook.write_text("user-edited legacy hook")
+    return hook, settings_path
+
+
+def test_install_and_legacy_cleanup() -> None:
+    print("\nstandalone install and legacy cleanup")
+    from ai_research_skills import installer
+
+    with tempfile.TemporaryDirectory() as raw:
+        root = pathlib.Path(raw)
+        foreign_settings = root / ".claude" / "settings.json"
+        foreign_settings.parent.mkdir(parents=True)
+        foreign_settings.write_text(json.dumps({"foreign": True, "hooks": {"Other": []}}))
+        before_settings = foreign_settings.read_bytes()
+        result = installer.install(raw, "claude")
+        check("fresh install succeeds", result == 0)
+        check(
+            "fresh install leaves foreign hook settings byte-identical",
+            foreign_settings.read_bytes() == before_settings,
+        )
+        check(
+            "fresh install creates no settings through absence",
+            not (root / ".claude" / "hooks").exists(),
+        )
+        check(
+            "fresh install has no hook directory", not (root / ".claude" / "hooks").exists()
+        )
+        manifest = json.loads((root / installer.MANIFEST_REL).read_text())
+        check(
+            "fresh manifest has no hook handlers",
+            manifest["hosts"]["claude"]["handlers"] == [],
+        )
+        check(
+            "fresh manifest does not own hook config",
+            manifest["hosts"]["claude"]["config"] is None,
+        )
+        check(
+            "lint alias installed",
+            (root / ".claude" / "commands" / "ars-lint.md").is_file(),
+        )
+        check(
+            "verify alias installed without hooks",
+            (root / ".claude" / "commands" / "ars-verify.md").is_file()
+            and not (root / ".claude" / "hooks").exists(),
+        )
+        check("doctor does not execute linter", installer.doctor(raw, "claude") == 0)
+        check(
+            "fresh manifest uses downgrade-safe format 2",
+            manifest["format"] == installer.MANIFEST_FORMAT == 2,
+        )
+        check(
+            "simulated format-1 reader rejects format-2 manifest",
+            manifest.get("format") != 1,
+        )
+
+    with tempfile.TemporaryDirectory() as raw:
+        root = pathlib.Path(raw)
+        settings_path = root / ".claude" / "settings.json"
+        settings_path.parent.mkdir(parents=True)
+        settings_path.write_text("{not valid json")
+        before = settings_path.read_bytes()
+        result = installer.install(raw, "claude")
+        check(
+            "fresh install ignores malformed foreign settings",
+            result == 0 and settings_path.read_bytes() == before,
+        )
+
+    with tempfile.TemporaryDirectory() as raw:
+        root = pathlib.Path(raw)
+        installer.install(raw, "claude")
+        missing_skill = root / ".claude" / "skills" / "ars-survey" / "SKILL.md"
+        missing_skill.unlink()
+        before_manifest = (root / installer.MANIFEST_REL).read_bytes()
+        result = installer.doctor(raw, "claude")
+        check(
+            "doctor reports missing skill without repairing it",
+            result != 0
+            and not missing_skill.exists()
+            and (root / installer.MANIFEST_REL).read_bytes() == before_manifest,
+        )
+
+    with tempfile.TemporaryDirectory() as raw:
+        root = pathlib.Path(raw)
+        installer.install(raw, "claude")
+        manifest_path = root / installer.MANIFEST_REL
+        manifest = json.loads(manifest_path.read_text())
+        manifest["format"] = 1
+        manifest_path.write_text(
+            json.dumps(
+                installer._seal_manifest(
+                    {
+                        key: value
+                        for key, value in manifest.items()
+                        if key != "manifest_sha256"
+                    }
+                )
+            )
+        )
+        result = installer.install(raw, "claude")
+        migrated = json.loads(manifest_path.read_text())
+        check(
+            "install migrates legacy format-1 manifest to format 2",
+            result == 0 and migrated["format"] == 2,
+        )
+
+    with tempfile.TemporaryDirectory() as raw:
+        root = pathlib.Path(raw)
+        installer.install(raw, "claude")
+        manifest_path = root / installer.MANIFEST_REL
+        manifest = json.loads(manifest_path.read_text())
+        manifest["format"] = 1
+        manifest_path.write_text(
+            json.dumps(
+                installer._seal_manifest(
+                    {
+                        key: value
+                        for key, value in manifest.items()
+                        if key != "manifest_sha256"
+                    }
+                )
+            )
+        )
+        result = installer.doctor(raw, "claude")
+        migrated = json.loads(manifest_path.read_text())
+        check(
+            "doctor migrates a clean legacy manifest without repairing files",
+            result == 0 and migrated["format"] == 2,
+        )
+
+    with tempfile.TemporaryDirectory() as raw:
+        root = pathlib.Path(raw)
+        installer.install(raw, "claude")
+        hook, _settings_path = _manifest_with_legacy_hook(root, "claude")
+        manifest_path = root / installer.MANIFEST_REL
+        manifest = json.loads(manifest_path.read_text())
+        manifest["format"] = 1
+        manifest_path.write_text(
+            json.dumps(
+                installer._seal_manifest(
+                    {
+                        key: value
+                        for key, value in manifest.items()
+                        if key != "manifest_sha256"
+                    }
+                )
+            )
+        )
+        missing_skill = root / ".claude" / "skills" / "ars-survey" / "SKILL.md"
+        missing_skill.unlink()
+        result = installer.doctor(raw, "claude")
+        migrated = json.loads(manifest_path.read_text())
+        check(
+            "doctor migrates format-1 only while cleaning legacy hooks",
+            result != 0
+            and not hook.exists()
+            and not missing_skill.exists()
+            and migrated["format"] == 2,
+        )
+
+    with tempfile.TemporaryDirectory() as raw:
+        root = pathlib.Path(raw)
+        from ai_research_skills import hook_adapters, hosts
+
+        installer.install(raw, "claude")
+        exact_hook, settings_path = _manifest_with_legacy_hook(root, "claude")
+        host = hosts.lookup("claude")
+        assert host is not None
+        modified_script = "absence_claim_guard.py"
+        modified_hook = root / host.ownership_root / "hooks" / modified_script
+        modified_hook.write_text("legacy absence hook")
+        modified_digest = installer._sha256(modified_hook.read_bytes())
+        modified_command = hook_adapters.command_for(host, modified_script, str(root))
+        settings = json.loads(settings_path.read_text())
+        settings["hooks"]["PostToolUse"] = [
+            {
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": modified_command,
+                        "timeout": 999,
+                    }
+                ]
+            }
+        ]
+        settings_path.write_text(json.dumps(settings))
+        manifest_path = root / installer.MANIFEST_REL
+        manifest = json.loads(manifest_path.read_text())
+        record = manifest["hosts"][host.id]
+        modified_relative = f"{host.ownership_root}/hooks/{modified_script}"
+        exact_relative = f"{host.ownership_root}/hooks/bib_provenance_guard.py"
+        record["files"][modified_relative] = modified_digest
+        record["handlers"].append(
+            {
+                "event": "PostToolUse",
+                "script": modified_script,
+                "command": modified_command,
+                "matcher": None,
+                "timeout": 10,
+                "definition": {
+                    "type": "command",
+                    "command": modified_command,
+                    "timeout": 10,
+                },
+            }
+        )
+        manifest["format"] = 1
+        manifest_path.write_text(
+            json.dumps(
+                installer._seal_manifest(
+                    {
+                        key: value
+                        for key, value in manifest.items()
+                        if key != "manifest_sha256"
+                    }
+                )
+            )
+        )
+        result = installer.doctor(raw, "claude")
+        migrated = json.loads(manifest_path.read_text())
+        migrated_record = migrated["hosts"][host.id]
+        migrated_handlers = migrated_record["handlers"]
+        check(
+            "format-1 doctor preserves only the modified handler and hook",
+            result != 0
+            and not exact_hook.exists()
+            and modified_hook.exists()
+            and migrated["format"] == 2
+            and migrated_record["config"] == f"{host.ownership_root}/{host.hooks_file}"
+            and [item["script"] for item in migrated_handlers] == [modified_script],
+        )
+        check(
+            "format-1 doctor preserves modified script digest only",
+            migrated_record["files"].get(modified_relative) == modified_digest
+            and exact_relative not in migrated_record["files"],
+        )
+        cleaned = json.loads(settings_path.read_text())
+        check(
+            "format-1 doctor removes exact sibling and retains modified handler",
+            "bib_provenance_guard.py" not in json.dumps(cleaned)
+            and modified_script in json.dumps(cleaned),
+        )
+        before_settings = settings_path.read_bytes()
+        before_hook = modified_hook.read_bytes()
+        repeat = installer.doctor(raw, "claude")
+        repeated_manifest = json.loads(manifest_path.read_text())
+        check(
+            "repeated doctor still reports and preserves modified ownership",
+            repeat != 0
+            and settings_path.read_bytes() == before_settings
+            and modified_hook.read_bytes() == before_hook
+            and [item["script"] for item in repeated_manifest["hosts"][host.id]["handlers"]]
+            == [modified_script],
+        )
+        install_result = installer.install(raw, "claude")
+        check(
+            "install after migrated doctor keeps the modified handler usable",
+            install_result == 0
+            and modified_hook.exists()
+            and modified_script in settings_path.read_text()
+            and [
+                item["script"]
+                for item in json.loads(manifest_path.read_text())["hosts"][host.id][
+                    "handlers"
+                ]
+            ]
+            == [modified_script],
+        )
+
+    with tempfile.TemporaryDirectory() as raw:
+        root = pathlib.Path(raw)
+        installer.install(raw, "claude")
+        hook, settings_path = _manifest_with_legacy_hook(root, "claude")
+        original = json.loads(settings_path.read_text())
+        result = installer.install(raw, "claude")
+        cleaned = json.loads(settings_path.read_text())
+        check("upgrade removes exact legacy hook file", result == 0 and not hook.exists())
+        check(
+            "upgrade removes exact legacy handler",
+            "bib_provenance_guard.py" not in settings_path.read_text(),
+        )
+        check(
+            "upgrade preserves foreign config",
+            cleaned.get("foreign_top") == original["foreign_top"]
+            and "foreign" in settings_path.read_text(),
+        )
+        new_manifest = json.loads((root / installer.MANIFEST_REL).read_text())
+        check(
+            "upgrade records no desired handlers",
+            new_manifest["hosts"]["claude"]["handlers"] == [],
+        )
+
+    with tempfile.TemporaryDirectory() as raw:
+        root = pathlib.Path(raw)
+        installer.install(raw, "claude")
+        hook, settings_path = _manifest_with_legacy_hook(
+            root, "claude", timeout=999, modified_file=True
+        )
+        before_hook = hook.read_bytes()
+        before_settings = settings_path.read_bytes()
+        result = installer.install(raw, "claude")
+        check("modified legacy leftovers do not block upgrade", result == 0)
+        check(
+            "modified legacy hook file is preserved",
+            hook.exists() and hook.read_bytes() == before_hook,
+        )
+        check(
+            "modified legacy handler is preserved",
+            settings_path.read_bytes() == before_settings,
+        )
+        check("doctor reports modified leftovers", installer.doctor(raw, "claude") != 0)
+
+    with tempfile.TemporaryDirectory() as raw:
+        root = pathlib.Path(raw)
+        installer.install(raw, "claude")
+        hook, settings_path = _manifest_with_legacy_hook(
+            root, "claude", timeout=999, modified_file=False
+        )
+        result = installer.install(raw, "claude")
+
+    with tempfile.TemporaryDirectory() as raw:
+        root = pathlib.Path(raw)
+        from ai_research_skills import hook_adapters, hosts
+
+        installer.install(raw, "claude")
+        host = hosts.lookup("claude")
+        assert host is not None
+        payload = root / host.ownership_root / "hooks" / "_payload.py"
+        modified_hook = root / host.ownership_root / "hooks" / "absence_claim_guard.py"
+        payload.parent.mkdir(parents=True, exist_ok=True)
+        payload.write_bytes(
+            (pathlib.Path(installer.ASSETS) / "hooks" / "_payload.py").read_bytes()
+        )
+        modified_hook.write_text("legacy payload-dependent hook")
+        command = hook_adapters.command_for(host, "absence_claim_guard.py", str(root))
+        settings_path = root / host.ownership_root / host.hooks_file
+        settings_path.write_text(
+            json.dumps(
+                {
                     "hooks": {
-                        "PreToolUse": [
+                        "PostToolUse": [
                             {
-                                "matcher": "Other",
                                 "hooks": [
-                                    {"type": "command", "command": "mine.py", "timeout": 1}
-                                ],
-                                "foreign_key": "keep",
+                                    {
+                                        "type": "command",
+                                        "command": command,
+                                        "timeout": 999,
+                                    }
+                                ]
                             }
                         ]
-                    },
+                    }
                 }
             )
         )
-        result = subprocess.run(
-            [sys.executable, str(INSTALL), str(root), "--host", "codex,cursor"],
-            text=True,
-            capture_output=True,
-        )
-        check(
-            "multi-host install succeeds",
-            result.returncode == 0,
-            result.stdout + result.stderr,
-        )
-        codex = json.loads((root / ".codex" / "hooks.json").read_text())
-        check(
-            "Codex has official top-level hooks object",
-            isinstance(codex.get("hooks"), dict)
-            and "PreToolUse" not in codex
-            and codex.get("description") == "foreign description",
-        )
-        check(
-            "Codex preserves foreign group and unknown key",
-            codex["hooks"]["PreToolUse"][0]["foreign_key"] == "keep"
-            and codex["hooks"]["PreToolUse"][0]["hooks"][0]["command"] == "mine.py",
-        )
-        codex_commands = [
-            handler["command"]
-            for entries in codex["hooks"].values()
-            for group in entries
-            for handler in group.get("hooks", [])
+        manifest_path = root / installer.MANIFEST_REL
+        manifest = json.loads(manifest_path.read_text())
+        record = manifest["hosts"][host.id]
+        payload_relative = f"{host.ownership_root}/hooks/_payload.py"
+        modified_relative = f"{host.ownership_root}/hooks/absence_claim_guard.py"
+        record["config"] = f"{host.ownership_root}/{host.hooks_file}"
+        record["files"][payload_relative] = installer._sha256(payload.read_bytes())
+        record["files"][modified_relative] = installer._sha256(modified_hook.read_bytes())
+        record["handlers"] = [
+            {
+                "event": "PostToolUse",
+                "script": "absence_claim_guard.py",
+                "command": command,
+                "matcher": None,
+                "timeout": 10,
+                "definition": {
+                    "type": "command",
+                    "command": command,
+                    "timeout": 10,
+                },
+            }
         ]
-        check(
-            "non-Claude hook command is absolute and profiles host",
-            bool(codex_commands)
-            and all(
-                str(root) in command and "--host codex" in command
-                for command in codex_commands
-                if any(script in command for script in installer.HOOK_SCRIPTS)
-            ),
-        )
-        check(
-            "Codex absence guard is PreToolUse only",
-            any("absence_claim_guard.py" in command for command in codex_commands)
-            and not any(
-                "absence_claim_guard.py" in handler.get("command", "")
-                for handler in codex["hooks"].get("PostToolUse", [])
-            ),
-        )
-        cursor = json.loads((root / ".cursor" / "hooks.json").read_text())
-        check(
-            "Cursor has version and camelCase preToolUse",
-            cursor.get("version") == 1 and "preToolUse" in cursor["hooks"],
-        )
-        check(
-            "Cursor uses direct native entries",
-            all(
-                "hooks" not in entry
-                and set(entry).issubset({"command", "matcher", "timeout"})
-                for entry in cursor["hooks"]["preToolUse"]
-            ),
-        )
-        check(
-            "Cursor hook commands are absolute and profile-selected",
-            all(
-                str(root) in entry.get("command", "")
-                and "--host cursor" in entry.get("command", "")
-                for entries in cursor["hooks"].values()
-                for entry in entries
-                if any(
-                    script in entry.get("command", "") for script in installer.HOOK_SCRIPTS
-                )
-            ),
-        )
-        check(
-            "Cursor absence guard is preToolUse",
-            any(
-                "absence_claim_guard.py" in entry["command"]
-                for entry in cursor["hooks"]["preToolUse"]
-            ),
-        )
-        check(
-            "Cursor stop advisory is explicitly omitted",
-            not any(
-                "stop_survey_peer.py" in json.dumps(entry)
-                for entries in cursor["hooks"].values()
-                for entry in entries
-            )
-            and not (root / ".cursor" / "hooks" / "stop_survey_peer.py").exists(),
-        )
-        check(
-            "adapter validates actual host shape",
-            not hook_adapters.validate_config(cursor, hosts.lookup("cursor")),
-        )
-        cursor_without_version = dict(cursor)
-        cursor_without_version.pop("version", None)
-        check(
-            "Cursor missing version uses default 1",
-            not hook_adapters.validate_config(
-                cursor_without_version, hosts.lookup("cursor")
-            ),
-        )
-
-        before = {
-            path.relative_to(root).as_posix(): path.read_bytes()
-            for path in root.rglob("*")
-            if path.is_file()
-        }
-        (root / ".claude" / "skills" / "ars-survey").mkdir(parents=True)
-        conflict = root / ".claude" / "skills" / "ars-survey" / "SKILL.md"
-        conflict.write_text("foreign")
-        before_conflict = {
-            path.relative_to(root).as_posix(): path.read_bytes()
-            for path in root.rglob("*")
-            if path.is_file()
-        }
-        result = subprocess.run(
-            [sys.executable, str(INSTALL), str(root), "--host", "claude"],
-            text=True,
-            capture_output=True,
-        )
-        after_conflict = {
-            path.relative_to(root).as_posix(): path.read_bytes()
-            for path in root.rglob("*")
-            if path.is_file()
-        }
-        check("same-name conflict fails", result.returncode != 0)
-        check("same-name conflict is zero-write", before_conflict == after_conflict)
-
-    with tempfile.TemporaryDirectory() as raw:
-        root = pathlib.Path(raw)
-        (root / ".claude").mkdir()
-        settings = {
-            "description": "keep",
-            "hooks": {
-                "PreToolUse": [
+        record["format"] = 1
+        manifest["format"] = 1
+        manifest_path.write_text(
+            json.dumps(
+                installer._seal_manifest(
                     {
-                        "matcher": "Write|Edit",
-                        "hooks": [
-                            {"type": "command", "command": "mine.py", "timeout": 1},
-                            {
-                                "type": "command",
-                                "command": "python3 .claude/hooks/bib_provenance_guard.py",
-                                "timeout": 10,
-                            },
-                            {
-                                "type": "command",
-                                "command": hook_adapters.command_for(
-                                    hosts.lookup("claude"),
-                                    "bib_provenance_guard.py",
-                                    str(root),
-                                ),
-                                "timeout": 999,
-                            },
-                            {
-                                "type": "command",
-                                "command": "echo survey_staleness.py",
-                                "timeout": 1,
-                            },
-                            {
-                                "type": "command",
-                                "command": "python3 /enterprise/survey_staleness.py.backup",
-                                "timeout": 1,
-                            },
-                            {
-                                "type": "command",
-                                "command": "python3 /enterprise/survey_staleness.py",
-                                "timeout": 1,
-                            },
-                        ],
+                        key: value
+                        for key, value in manifest.items()
+                        if key != "manifest_sha256"
                     }
-                ]
-            },
-        }
-        (root / ".claude" / "settings.json").write_text(json.dumps(settings))
-        result = subprocess.run(
-            [sys.executable, str(INSTALL), str(root), "--host", "claude"],
-            text=True,
-            capture_output=True,
-        )
-        merged = json.loads((root / ".claude" / "settings.json").read_text())
-        handlers = merged["hooks"]["PreToolUse"][0]["hooks"]
-        check("mixed foreign group install succeeds", result.returncode == 0)
-        check(
-            "mixed group keeps foreign handler and matcher",
-            any(h.get("command") == "mine.py" for h in handlers)
-            and merged["description"] == "keep",
-        )
-        all_commands = json.dumps(merged)
-        check(
-            "foreign script-name commands are not owned by basename",
-            all(
-                token in all_commands
-                for token in (
-                    "echo survey_staleness.py",
-                    "/enterprise/survey_staleness.py.backup",
-                    "/enterprise/survey_staleness.py",
                 )
-            ),
+            )
         )
-        all_handlers = [
-            h
-            for entries in merged["hooks"].values()
-            for entry in entries
-            for h in (entry.get("hooks", []) if isinstance(entry, dict) else [])
-        ]
+        modified_hook.write_text("user-edited payload-dependent hook")
         check(
-            "matching command with foreign definition is not owned",
-            any(
-                h.get("command")
-                == hook_adapters.command_for(
-                    hosts.lookup("claude"), "bib_provenance_guard.py", str(root)
-                )
-                and h.get("timeout") == 999
-                for h in all_handlers
-            ),
-        )
-        check(
-            "mixed group replaces only our handler",
-            # The exact historical command in this incomplete no-manifest
-            # config is foreign until the full legacy fingerprint is proven;
-            # the new handlers are added beside it rather than claimed.
-            sum("bib_provenance_guard.py" in h.get("command", "") for h in all_handlers)
-            == len(installer.HOOK_SPEC[0][4]) + 2,
-        )
-        check(
-            "reinstall is idempotent",
-            subprocess.run(
-                [sys.executable, str(INSTALL), str(root), "--host", "claude"],
-                capture_output=True,
-            ).returncode
-            == 0,
-        )
-        manifest = root / ".ai-research-skills" / "manifest.json"
-        data = json.loads(manifest.read_text())
-        data["hosts"]["claude"]["files"]["tampered"] = "0" * 64
-        manifest.write_text(json.dumps(data))
-        before = {
-            path.relative_to(root).as_posix(): path.read_bytes()
-            for path in root.rglob("*")
-            if path.is_file()
-        }
-        check(
-            "modified manifest rejects upgrade", installer.install(str(root), "claude") != 0
-        )
-        check(
-            "modified manifest rejects uninstall",
-            installer.uninstall(str(root), "claude") != 0,
-        )
-        after = {
-            path.relative_to(root).as_posix(): path.read_bytes()
-            for path in root.rglob("*")
-            if path.is_file()
-        }
-        check("manifest rejection preserves files", before == after)
-
-    with tempfile.TemporaryDirectory() as raw:
-        root = pathlib.Path(raw)
-        (root / ".claude").mkdir()
-        (root / ".claude" / "settings.json").write_text("{bad")
-        before = (root / ".claude" / "settings.json").read_bytes()
-        check("invalid JSON install rejects", installer.install(str(root), "claude") != 0)
-        check(
-            "invalid JSON is zero-write",
-            (root / ".claude" / "settings.json").read_bytes() == before
-            and not (root / ".ai-research-skills").exists(),
-        )
-
-        real = root / "real"
-        real.mkdir()
-        symlink_root = root / "symlink-project"
-        symlink_root.symlink_to(real, target_is_directory=True)
-        check(
-            "symlink target root rejects",
-            installer.install(str(symlink_root), "claude") != 0,
-        )
-        root2 = root / "ancestor"
-        root2.mkdir()
-        (root2 / ".claude").symlink_to(real, target_is_directory=True)
-        check("symlink ancestor rejects", installer.install(str(root2), "claude") != 0)
-
-    with tempfile.TemporaryDirectory() as raw:
-        root = pathlib.Path(raw)
-        legacy = root / ".claude" / "skills" / "rs-survey"
-        legacy.mkdir(parents=True)
-        (legacy / "SKILL.md").write_text("unknown user asset")
-        check(
-            "unknown legacy asset blocks mutation with migration guidance",
-            installer.install(str(root), "claude") != 0,
-        )
-        check(
-            "unknown legacy asset is preserved",
-            (legacy / "SKILL.md").read_text() == "unknown user asset"
-            and not (root / ".claude" / "skills" / "ars-survey").exists(),
-        )
-        legacy.rename(root / ".claude" / "skills" / "legacy-survey-user")
-        check(
-            "uninstall remains safe after legacy refusal",
-            installer.uninstall(str(root), "claude") == 0
-            and installer.uninstall(str(root), "claude") == 0,
+            "legacy modified handler protects its owned payload dependency",
+            installer.uninstall(raw, "claude") == 0
+            and modified_hook.exists()
+            and payload.exists()
+            and not (root / installer.MANIFEST_REL).exists()
+            and settings_path.exists(),
         )
 
     with tempfile.TemporaryDirectory() as raw:
         root = pathlib.Path(raw)
         original = installer._atomic_write
-        calls = {"n": 0}
+        calls = {"count": 0}
 
-        def fail_after_two(path: str, data: bytes, mode: int = 0o644) -> None:
-            calls["n"] += 1
-            if calls["n"] == 3:
-                raise OSError("injected replace fault")
+        def fail_after_three(path: str, data: bytes, mode: int = 0o644) -> None:
+            calls["count"] += 1
+            if calls["count"] == 3:
+                raise OSError("injected transaction fault")
             original(path, data, mode)
 
-        installer._atomic_write = fail_after_two
+        installer._atomic_write = fail_after_three
         try:
-            result = installer.install(str(root), "claude")
+            result = installer.install(raw, "claude")
         finally:
             installer._atomic_write = original
-        suite_files = list(
-            (root / ".claude").rglob("*") if (root / ".claude").exists() else []
-        )
-        check("fault injection returns nonzero", result != 0)
+        check("transaction fault returns nonzero", result != 0)
         check(
-            "fault injection rolls back suite and manifest",
-            not suite_files
-            and not (root / ".ai-research-skills" / "manifest.json").exists(),
-        )
-
-    with tempfile.TemporaryDirectory() as raw:
-        root = pathlib.Path(raw)
-        check(
-            "baseline install for source-byte upgrade",
-            installer.install(str(root), "claude") == 0,
-        )
-        original_desired = installer._desired_files
-
-        def changed_source(target_root: str, host: Any) -> dict[str, bytes]:
-            desired = original_desired(target_root, host)
-            key = str(pathlib.Path(target_root) / ".claude/skills/ars-survey/SKILL.md")
-            desired[key] += b"\n# package source changed\n"
-            return desired
-
-        installer._desired_files = changed_source
-        try:
-            upgraded = installer.install(str(root), "claude")
-        finally:
-            installer._desired_files = original_desired
-        changed_file = root / ".claude" / "skills" / "ars-survey" / "SKILL.md"
-        check(
-            "manifest old hash permits source-byte upgrade",
-            upgraded == 0
-            and changed_file.read_bytes().endswith(b"# package source changed\n"),
-        )
-
-        stale = root / ".claude" / "obsolete-from-previous-package.txt"
-        stale.write_text("old package")
-        data = json.loads((root / ".ai-research-skills" / "manifest.json").read_text())
-        data["hosts"]["claude"]["files"][".claude/obsolete-from-previous-package.txt"] = (
-            installer._sha256(stale.read_bytes())
-        )
-        (root / ".ai-research-skills" / "manifest.json").write_text(
-            json.dumps(
-                installer._seal_manifest(
-                    {k: v for k, v in data.items() if k != "manifest_sha256"}
-                )
-            )
+            "transaction rollback removes package output",
+            not (root / ".ai-research-skills" / "manifest.json").exists(),
         )
         check(
-            "upgrade removes unmodified stale manifest file",
-            installer.install(str(root), "claude") == 0 and not stale.exists(),
-        )
-
-    with tempfile.TemporaryDirectory() as raw:
-        root = pathlib.Path(raw)
-        check(
-            "multi-host install for selective uninstall",
-            installer.install(str(root), "claude,pi") == 0,
-        )
-        claude_file = root / ".claude" / "skills" / "ars-survey" / "SKILL.md"
-        pi_file = root / ".pi" / "skills" / "ars-survey" / "SKILL.md"
-        claude_file.write_text("user claude edit")
-        pi_file.write_text("user pi edit")
-        check(
-            "uninstall keeps modified selected host files",
-            installer.uninstall(str(root), "claude") == 0
-            and claude_file.read_text() == "user claude edit",
-        )
-        check(
-            "unselected modified host does not block uninstall",
-            pi_file.read_text() == "user pi edit"
-            and (root / ".ai-research-skills" / "manifest.json").exists(),
-        )
-        check(
-            "uninstall keeps modified other-host file",
-            installer.uninstall(str(root), "pi") == 0
-            and pi_file.read_text() == "user pi edit",
-        )
-
-    with tempfile.TemporaryDirectory() as raw:
-        root = pathlib.Path(raw)
-        installer.install(str(root), "claude")
-        settings_path = root / ".claude" / "settings.json"
-        settings = json.loads(settings_path.read_text())
-        settings["hooks"]["PreToolUse"][0]["hooks"][0]["command"] += " --user-edit"
-        settings_path.write_text(json.dumps(settings))
-        check(
-            "uninstall keeps modified handler and removes exact remainder",
-            installer.uninstall(str(root), "claude") == 0
-            and "--user-edit" in settings_path.read_text(),
-        )
-
-    with tempfile.TemporaryDirectory() as raw:
-        root = pathlib.Path(raw)
-        original_atomic = installer._atomic_write
-        calls = {"n": 0}
-
-        def interrupt_after_write(path: str, data: bytes, mode: int = 0o644) -> None:
-            calls["n"] += 1
-            original_atomic(path, data, mode)
-            if calls["n"] == 3:
-                raise KeyboardInterrupt("simulated process interruption")
-
-        installer._atomic_write = interrupt_after_write
-        interrupted = False
-        try:
-            installer.install(str(root), "claude")
-        except KeyboardInterrupt:
-            interrupted = True
-        finally:
-            installer._atomic_write = original_atomic
-        journal = root / ".ai-research-skills" / "transaction.json"
-        check(
-            "interrupted transaction leaves persistent journal",
-            interrupted and journal.exists(),
-        )
-        check(
-            "new installer instance recovers journal",
-            installer.install(str(root), "claude") == 0 and not journal.exists(),
+            "transaction rollback leaves no hook directory",
+            not (root / ".claude" / "hooks").exists(),
         )
 
 
-def test_hardening_regressions() -> None:
-    """Focused adversarial cases for migration, transactions, and locking."""
-    print("\nhardening regressions")
+def _manifestless_legacy_fixture(
+    root: pathlib.Path, host_id: str
+) -> tuple[pathlib.Path, dict[str, object]]:
     from ai_research_skills import hook_adapters, hosts, installer
 
-    check("release version is 0.6.0", installer.__version__ == "0.6.0")
-
-    with tempfile.TemporaryDirectory() as raw:
-        fake_root = pathlib.Path(raw)
-        dist_info = fake_root / "ai_research_skills-0.5.0.dist-info"
-        dist_info.mkdir()
-        (dist_info / "METADATA").write_text(
-            "Metadata-Version: 2.1\nName: ai-research-skills\nVersion: 0.5.0\n"
+    host = hosts.lookup(host_id)
+    assert host is not None
+    adapter = hook_adapters.for_host(host)
+    timeout_by_script = {
+        script: timeout for _event, _matcher, script, timeout in hook_adapters._BASE_SPECS
+    }
+    settings: dict[str, object]
+    if host_id == "codex":
+        settings = {"foreign_top": True}
+        container = settings
+    else:
+        settings = {"version": 1, "foreign_top": True, "hooks": {}}
+        container = settings["hooks"]
+    assert isinstance(container, dict)
+    files: dict[str, str] = {}
+    commands: list[str] = []
+    for canonical_event, _matcher, script, _timeout in hook_adapters._BASE_SPECS:
+        event = adapter.event(canonical_event)
+        command = hook_adapters.historical_command_forms(host, script)[0]
+        commands.append(command)
+        hook = root / host.ownership_root / "hooks" / script
+        hook.parent.mkdir(parents=True, exist_ok=True)
+        hook.write_text(f"legacy {script}")
+        files[installer._relative(str(root), str(hook))] = installer._sha256(
+            hook.read_bytes()
         )
-        env = dict(os.environ)
-        env["PYTHONPATH"] = os.pathsep.join((str(fake_root), str(SRC)))
-        result = subprocess.run(
-            [
-                sys.executable,
-                "-c",
-                "import ai_research_skills; print(ai_research_skills.__version__)",
-            ],
-            env=env,
-            text=True,
-            capture_output=True,
-        )
-        check(
-            "source checkout ignores same-name stale distribution metadata",
-            result.returncode == 0 and result.stdout.strip() == "0.6.0",
-            result.stderr,
-        )
-
-    with tempfile.TemporaryDirectory() as raw:
-        fake_root = pathlib.Path(raw)
-        package = fake_root / "ai_research_skills"
-        package.mkdir()
-        (package / "__init__.py").write_text(
-            (SRC / "ai_research_skills" / "__init__.py").read_text()
-        )
-        for version in ("0.5.0", "0.6.0"):
-            dist_info = fake_root / f"ai_research_skills-{version}.dist-info"
-            dist_info.mkdir()
-            (dist_info / "METADATA").write_text(
-                f"Metadata-Version: 2.1\nName: ai-research-skills\nVersion: {version}\n"
-            )
-        env = dict(os.environ)
-        env["PYTHONPATH"] = str(fake_root)
-        result = subprocess.run(
-            [
-                sys.executable,
-                "-c",
-                "import ai_research_skills; print(ai_research_skills.__version__)",
-            ],
-            env=env,
-            text=True,
-            capture_output=True,
-        )
-        check(
-            "same-directory conflicting metadata falls back safely",
-            result.returncode == 0 and result.stdout.strip() == "0.6.0",
-            result.stderr,
-        )
-
-    import ai_research_skills as package_module
-
-    bad_name_distribution = type("BadNameDistribution", (), {"metadata": {"Name": None}})()
-    original_distributions = package_module.distributions
-    package_module.distributions = lambda: [bad_name_distribution]
-    try:
-        bad_name_version = package_module._metadata_version()
-    finally:
-        package_module.distributions = original_distributions
-    check("non-string distribution name is safe", bad_name_version is None)
-
-    with tempfile.TemporaryDirectory() as raw:
-        root = pathlib.Path(raw)
-        (root / ".cursor").mkdir()
-        settings_path = root / ".cursor" / "hooks.json"
-        settings_path.write_text(json.dumps({"version": True}))
-        before = {
-            path.relative_to(root).as_posix(): path.read_bytes()
-            for path in root.rglob("*")
-            if path.is_file()
+        handler = {
+            "type": "command",
+            "command": command,
+            "timeout": timeout_by_script[script],
         }
-        install_result = installer.install(str(root), "cursor")
-        after = {
-            path.relative_to(root).as_posix(): path.read_bytes()
-            for path in root.rglob("*")
-            if path.is_file()
+        if script in {"bib_provenance_guard.py", "absence_claim_guard.py"}:
+            matcher = {
+                "codex": "apply_patch|Write|Edit",
+                "pi": "write|edit",
+            }.get(host_id, "Write|Edit")
+            group = {"matcher": matcher, "hooks": [handler]}
+        else:
+            group = {"hooks": [handler]}
+        entries = container.setdefault(event, [])
+        assert isinstance(entries, list)
+        entries.append(group)
+
+    # A foreign group in an ARS event must survive migration in both historical layouts.
+    absence_event = adapter.event("PostToolUse")
+    entries = container.setdefault(absence_event, [])
+    assert isinstance(entries, list)
+    entries.append(
+        {
+            "matcher": "Other",
+            "foreign_group": True,
+            "hooks": [{"type": "command", "command": "foreign", "timeout": 1}],
         }
-        check(
-            "Cursor boolean version rejects install with zero writes",
-            install_result != 0
-            and before == after
-            and not (root / ".ai-research-skills").exists(),
+    )
+    settings_path = root / host.ownership_root / host.hooks_file
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
+    settings_path.write_text(json.dumps(settings))
+    fingerprint = {
+        "format": 1,
+        "package": "ai-research-skills",
+        "version": "0.5.0",
+        "hosts": {host_id: {"files": files, "handler_commands": commands}},
+    }
+    return settings_path, fingerprint
+
+
+def test_migration_safety_regressions() -> None:
+    print("\nmigration and installer safety regressions")
+    from ai_research_skills import hook_adapters, hosts, installer
+
+    for host_id in ("codex", "cursor", "pi"):
+        host = hosts.lookup(host_id)
+        assert host is not None
+        command = (
+            hook_adapters.historical_command_forms(host, "survey_staleness.py")[0]
+            + " --custom"
         )
         check(
-            "Cursor boolean version fails adapter validation",
-            bool(hook_adapters.validate_config({"version": True}, hosts.lookup("cursor"))),
+            f"{host_id} historical command suffix is classified, not exact",
+            hook_adapters.script_for_command(command, host) == "survey_staleness.py"
+            and hook_adapters.exact_script(command, host) is None,
         )
 
     with tempfile.TemporaryDirectory() as raw:
         root = pathlib.Path(raw)
-        check(
-            "valid Cursor install for doctor version fixture",
-            installer.install(str(root), "cursor") == 0,
-        )
-        settings_path = root / ".cursor" / "hooks.json"
-        settings = json.loads(settings_path.read_text())
-        settings["version"] = True
-        settings_path.write_text(json.dumps(settings))
-        check(
-            "Cursor boolean version fails doctor",
-            installer.doctor(str(root), "cursor") != 0,
-        )
-
-    with tempfile.TemporaryDirectory() as raw:
-        root = pathlib.Path(raw)
-        (root / ".claude").mkdir()
-        settings_path = root / ".claude" / "settings.json"
-        foreign = {
+        host = hosts.lookup("pi")
+        assert host is not None
+        script = "bib_provenance_guard.py"
+        command = hook_adapters.historical_command_forms(host, script)[0] + " --custom"
+        settings = {
             "hooks": {
                 "PreToolUse": [
                     {
-                        "matcher": "Write|Edit",
-                        "hooks": [
-                            {
-                                "type": "command",
-                                "command": 'python3 ".claude/hooks/bib_provenance_guard.py"',
-                                "timeout": 10,
-                            }
-                        ],
-                        "foreign_key": "leave-me",
+                        "matcher": "write|edit",
+                        "hooks": [{"type": "command", "command": command, "timeout": 10}],
                     }
                 ]
-            },
-            "description": "foreign",
+            }
         }
-        settings_path.write_text(json.dumps(foreign, separators=(",", ":")))
-        before = settings_path.read_bytes()
-        check(
-            "incomplete no-manifest historical command is uninstall no-op",
-            installer.uninstall(str(root), "claude") == 0
-            and settings_path.read_bytes() == before,
+        cleaned, removed, modified = hook_adapters.cleanup(
+            settings, host, root=str(root), allow_legacy=True
         )
+        foreign = command.replace(f"{script}", f"{script}.bak")
         check(
-            "incomplete no-manifest install preserves exact foreign handler",
-            installer.install(str(root), "claude") == 0
-            and any(
-                handler.get("command") == 'python3 ".claude/hooks/bib_provenance_guard.py"'
-                for group in json.loads(settings_path.read_text())["hooks"]["PreToolUse"]
-                for handler in group.get("hooks", [])
-            ),
+            "historical relative command suffix is retained as modified",
+            removed == []
+            and modified == [script]
+            and script in json.dumps(cleaned)
+            and hook_adapters.script_for_command(foreign, host) is None,
         )
 
     with tempfile.TemporaryDirectory() as raw:
         root = pathlib.Path(raw)
-        (root / ".claude").mkdir()
-        command = hook_adapters.command_for(
-            hosts.lookup("claude"), "bib_provenance_guard.py", str(root)
-        )
-        settings_path = root / ".claude" / "settings.json"
+        installer.install(str(root), "pi")
+        host = hosts.lookup("pi")
+        assert host is not None
+        script = "bib_provenance_guard.py"
+        hook = root / host.ownership_root / "hooks" / script
+        hook.parent.mkdir(parents=True, exist_ok=True)
+        hook.write_text("shared legacy hook")
+        exact_command = hook_adapters.historical_command_forms(host, script)[0]
+        modified_command = exact_command + " --custom"
+        settings_path = root / host.ownership_root / host.hooks_file
+        settings_path.parent.mkdir(parents=True, exist_ok=True)
         settings_path.write_text(
             json.dumps(
                 {
+                    "hooks": {
+                        "PreToolUse": [
+                            {
+                                "matcher": "write|edit",
+                                "hooks": [
+                                    {
+                                        "type": "command",
+                                        "command": exact_command,
+                                        "timeout": 10,
+                                    },
+                                    {
+                                        "type": "command",
+                                        "command": modified_command,
+                                        "timeout": 10,
+                                    },
+                                ],
+                            }
+                        ]
+                    }
+                }
+            )
+        )
+        manifest_path = root / installer.MANIFEST_REL
+        manifest = json.loads(manifest_path.read_text())
+        record = manifest["hosts"][host.id]
+        relative = f"{host.ownership_root}/hooks/{script}"
+        record["config"] = f"{host.ownership_root}/{host.hooks_file}"
+        record["files"][relative] = installer._sha256(hook.read_bytes())
+        record["handlers"] = [
+            {
+                "event": "PreToolUse",
+                "script": script,
+                "command": exact_command,
+                "matcher": "write|edit",
+                "timeout": 10,
+                "definition": {
+                    "type": "command",
+                    "command": exact_command,
+                    "timeout": 10,
+                },
+            }
+        ]
+        manifest_path.write_text(
+            json.dumps(
+                installer._seal_manifest(
+                    {
+                        key: value
+                        for key, value in manifest.items()
+                        if key != "manifest_sha256"
+                    }
+                )
+            )
+        )
+        result = installer.install(str(root), "pi")
+        cleaned = json.loads(settings_path.read_text())
+        migrated = json.loads(manifest_path.read_text())
+        commands = [
+            handler["command"]
+            for group in cleaned["hooks"]["PreToolUse"]
+            for handler in group["hooks"]
+        ]
+        check(
+            "historical suffix keeps a shared legacy script after exact cleanup",
+            result == 0
+            and hook.exists()
+            and commands == [modified_command]
+            and relative in migrated["hosts"][host.id]["files"]
+            and [item["script"] for item in migrated["hosts"][host.id]["handlers"]]
+            == [script],
+        )
+    for host_id in ("codex", "pi", "cursor"):
+        with tempfile.TemporaryDirectory() as raw:
+            root = pathlib.Path(raw)
+            settings_path, fingerprint = _manifestless_legacy_fixture(root, host_id)
+            old_loader = installer._load_legacy_fingerprint
+            installer._load_legacy_fingerprint = lambda fingerprint=fingerprint: fingerprint
+            try:
+                result = installer.install(str(root), host_id)
+            finally:
+                installer._load_legacy_fingerprint = old_loader
+            migrated = json.loads(settings_path.read_text())
+            check(
+                f"manifestless {host_id} v0.5 migration succeeds",
+                result == 0,
+            )
+            check(
+                f"manifestless {host_id} removes obsolete hook files",
+                not (root / f".{host_id}" / "hooks").exists()
+                or not any((root / f".{host_id}" / "hooks").iterdir()),
+            )
+            check(
+                f"manifestless {host_id} preserves foreign hook entries",
+                "foreign" in json.dumps(migrated) and migrated.get("foreign_top") is True,
+            )
+            check(
+                f"manifestless {host_id} removes ARS commands only",
+                not any(
+                    script in json.dumps(migrated) for script in hook_adapters.HOOK_SCRIPTS
+                )
+                and "foreign" in json.dumps(migrated),
+            )
+
+    with tempfile.TemporaryDirectory() as raw:
+        root = pathlib.Path(raw)
+        host = hosts.lookup("kimi")
+        assert host is not None
+        desired = installer._desired_files(str(root), host)
+        files: dict[str, str] = {}
+        for path, data in desired.items():
+            pathlib.Path(path).parent.mkdir(parents=True, exist_ok=True)
+            pathlib.Path(path).write_bytes(data)
+            files[installer._relative(str(root), path)] = installer._sha256(data)
+        settings_path = root / ".kimi" / "settings.json"
+        settings_path.parent.mkdir(parents=True, exist_ok=True)
+        settings_path.write_text(json.dumps({"foreign": True, "hooks": {"Other": []}}))
+        before_settings = settings_path.read_bytes()
+        published = installer._load_legacy_fingerprint()
+        kimi_record = dict(published["hosts"]["kimi"])
+        kimi_record["files"] = files
+        fingerprint = {
+            "format": published["format"],
+            "hosts": {"kimi": kimi_record},
+        }
+        old_loader = installer._load_legacy_fingerprint
+        installer._load_legacy_fingerprint = lambda fingerprint=fingerprint: fingerprint
+        try:
+            result = installer.install(str(root), "kimi")
+        finally:
+            installer._load_legacy_fingerprint = old_loader
+        check(
+            "Kimi legacy ordinary files adopt without hook proof",
+            result == 0 and settings_path.read_bytes() == before_settings,
+        )
+
+    with tempfile.TemporaryDirectory() as raw:
+        root = pathlib.Path(raw)
+        host = hosts.lookup("claude")
+        assert host is not None
+        settings_path = root / ".claude" / host.hooks_file
+        settings_path.parent.mkdir(parents=True)
+        command = hook_adapters.historical_command_forms(host, "bib_provenance_guard.py")[0]
+        settings_path.write_text(
+            json.dumps(
+                {
+                    "foreign_top": True,
                     "hooks": {
                         "PreToolUse": [
                             {
@@ -1006,39 +1211,25 @@ def test_hardening_regressions() -> None:
                                     {
                                         "type": "command",
                                         "command": command,
-                                        "timeout": 999,
+                                        "timeout": 10,
                                     }
                                 ],
                             }
                         ]
-                    }
+                    },
                 }
             )
         )
+        before = settings_path.read_bytes()
+        result = installer.install(str(root), "claude")
         check(
-            "same-command foreign handler initial install survives",
-            installer.install(str(root), "claude") == 0,
-        )
-        manifest = json.loads((root / ".ai-research-skills" / "manifest.json").read_text())
-        owned = manifest["hosts"]["claude"]["handlers"]
-        check(
-            "same-command foreign handler is not manifest-owned",
-            not any(record.get("timeout") == 999 for record in owned),
+            "partial manifestless legacy handler is preserved",
+            result == 0 and settings_path.read_bytes() == before,
         )
         check(
-            "same-command foreign handler survives reinstall",
-            installer.install(str(root), "claude") == 0
-            and any(
-                handler.get("command") == command and handler.get("timeout") == 999
-                for group in json.loads(settings_path.read_text())["hooks"]["PreToolUse"]
-                for handler in group.get("hooks", [])
-            ),
-        )
-        check(
-            "same-command foreign handler survives uninstall",
-            installer.uninstall(str(root), "claude") == 0
-            and any(
-                handler.get("command") == command and handler.get("timeout") == 999
+            "partial manifestless handler is still present",
+            any(
+                handler.get("command") == command
                 for group in json.loads(settings_path.read_text())["hooks"]["PreToolUse"]
                 for handler in group.get("hooks", [])
             ),
@@ -1046,137 +1237,214 @@ def test_hardening_regressions() -> None:
 
     with tempfile.TemporaryDirectory() as raw:
         root = pathlib.Path(raw)
-        host = hosts.lookup("cursor")
-        assert host is not None
-        desired = installer._desired_files(str(root), host)
-        for path, data in desired.items():
-            pathlib.Path(path).parent.mkdir(parents=True, exist_ok=True)
-            pathlib.Path(path).write_bytes(data)
-        stale = root / ".cursor" / "hooks" / "stop_survey_peer.py"
-        stale.parent.mkdir(parents=True, exist_ok=True)
-        stale.write_bytes((pathlib.Path(installer.SRC_HOOKS) / stale.name).read_bytes())
-        legacy_files = {
-            installer._relative(str(root), path): installer._sha256(data)
-            for path, data in desired.items()
-        }
-        legacy_files[".cursor/hooks/stop_survey_peer.py"] = installer._sha256(
-            stale.read_bytes()
+        installer.install(str(root), "claude")
+        _hook, settings_path = _manifest_with_legacy_hook(root, "claude")
+        settings = json.loads(settings_path.read_text())
+        settings["hooks"]["PreToolUse"][0]["matcher"] = "Other"
+        settings_path.write_text(json.dumps(settings))
+        result = installer.install(str(root), "claude")
+        retained = json.loads(settings_path.read_text())
+        check(
+            "modified manifest group matcher does not remove handler",
+            result == 0
+            and retained["hooks"]["PreToolUse"][0]["matcher"] == "Other"
+            and any(
+                handler.get("command")
+                == hook_adapters.command_for(
+                    hosts.lookup("claude"), "bib_provenance_guard.py", str(root)
+                )
+                for group in retained["hooks"]["PreToolUse"]
+                for handler in group.get("hooks", [])
+            ),
+        )
+        check(
+            "modified matcher test still has a foreign sibling",
+            "foreign" in settings_path.read_text(),
         )
 
-        def old_handler(script: str, timeout: int) -> dict[str, Any]:
-            return {
-                "type": "command",
-                "command": f'python3 ".cursor/hooks/{script}"',
-                "timeout": timeout,
-            }
+    with tempfile.TemporaryDirectory() as raw:
+        root = pathlib.Path(raw)
+        (root / ".claude").mkdir()
+        marker = root / ".claude" / "foreign.txt"
+        marker.write_text("keep")
+        result = installer.doctor(str(root), "claude")
+        check(
+            "doctor with no manifest is diagnostic-only",
+            result != 0
+            and marker.read_text() == "keep"
+            and not (root / installer.MANIFEST_REL).exists()
+            and not (root / ".claude" / "skills").exists(),
+        )
 
-        settings = {
-            "version": 1,
-            "hooks": {
-                "preToolUse": [
-                    {
-                        "matcher": "Write|Edit",
-                        "hooks": [old_handler("bib_provenance_guard.py", 10)],
-                        "unknown_group": "preserve",
-                    }
-                ],
-                "postToolUse": [
-                    {
-                        "matcher": "Write|Edit",
-                        "hooks": [
-                            old_handler("absence_claim_guard.py", 10),
-                            {"type": "command", "command": "foreign.py", "timeout": 1},
-                        ],
-                    }
-                ],
-                "sessionStart": [{"hooks": [old_handler("survey_staleness.py", 10)]}],
-                "stop": [{"hooks": [old_handler("stop_survey_peer.py", 15)]}],
-            },
-            "foreign_top": True,
-        }
-        settings_path = root / ".cursor" / "hooks.json"
-        settings_path.parent.mkdir(parents=True, exist_ok=True)
-        settings_path.write_text(json.dumps(settings))
-        fingerprint = {
-            "format": 1,
-            "package": "ai-research-skills",
-            "version": "0.5.0",
-            "hosts": {
-                "cursor": {
-                    "files": legacy_files,
-                    "handler_commands": [
-                        f'python3 ".cursor/hooks/{script}"'
-                        for script in (
-                            "bib_provenance_guard.py",
-                            "absence_claim_guard.py",
-                            "survey_staleness.py",
-                            "stop_survey_peer.py",
-                        )
-                    ],
-                }
-            },
-        }
+    with tempfile.TemporaryDirectory() as raw:
+        root = pathlib.Path(raw)
+        settings_path, fingerprint = _manifestless_legacy_fixture(root, "cursor")
         old_loader = installer._load_legacy_fingerprint
-        installer._load_legacy_fingerprint = lambda: fingerprint
+        installer._load_legacy_fingerprint = lambda fingerprint=fingerprint: fingerprint
         try:
-            check(
-                "complete Cursor v0.5 fingerprint/layout is adopted",
-                installer._legacy_adoption(str(root), host, settings)[0],
-            )
-            upgraded = installer.install(str(root), "cursor")
-            migrated = json.loads(settings_path.read_text())
-            event_entries = [
-                entry
-                for event, entries in migrated["hooks"].items()
-                if event in {"preToolUse", "postToolUse", "sessionStart"}
-                for entry in entries
-            ]
-            manifest = json.loads(
-                (root / ".ai-research-skills" / "manifest.json").read_text()
-            )
-            manifest_files = manifest["hosts"]["cursor"]["files"]
-            check(
-                "Cursor migration writes native direct entries and removes old Stop",
-                upgraded == 0
-                and all("hooks" not in entry for entry in event_entries)
-                and not stale.exists()
-                and not any(
-                    "stop_survey_peer.py" in json.dumps(entry)
-                    for entry in migrated["hooks"].get("stop", [])
-                ),
-            )
-            check(
-                "Cursor migration retains foreign handler/unknown keys",
-                "foreign.py" in json.dumps(migrated)
-                and migrated.get("foreign_top") is True
-                and "unknown_group" in json.dumps(migrated),
-            )
-            check(
-                "Cursor manifest retains all desired assets without stale Stop",
-                all(
-                    path in manifest_files
-                    for path in legacy_files
-                    if path != stale.relative_to(root).as_posix()
-                )
-                and stale.relative_to(root).as_posix() not in manifest_files,
-            )
-            check(
-                "migrated Cursor install passes doctor",
-                installer.doctor(str(root), "cursor") == 0,
-            )
-            check(
-                "migrated Cursor uninstall preserves foreign config",
-                installer.uninstall(str(root), "cursor") == 0
-                and "foreign.py" in settings_path.read_text(),
-            )
+            result = installer.doctor(str(root), "cursor")
         finally:
             installer._load_legacy_fingerprint = old_loader
+        check(
+            "doctor cleans a complete legacy install without installing a suite",
+            result == 0
+            and not (root / installer.MANIFEST_REL).exists()
+            and (
+                not (root / ".cursor" / "hooks").exists()
+                or not any((root / ".cursor" / "hooks").iterdir())
+            )
+            and "foreign" in settings_path.read_text(),
+        )
+
+    with tempfile.TemporaryDirectory() as raw:
+        root = pathlib.Path(raw)
+        real = root / "real"
+        real.mkdir()
+        symlink_root = root / "project"
+        symlink_root.symlink_to(real, target_is_directory=True)
+        check(
+            "symlink project root is rejected without writes",
+            installer.install(str(symlink_root), "claude") != 0
+            and not (real / installer.MANIFEST_REL).exists(),
+        )
+
+    with tempfile.TemporaryDirectory() as raw:
+        root = pathlib.Path(raw)
+        installer.install(str(root), "claude")
+        foreign = root / ".claude" / "foreign-owned.txt"
+        foreign.write_text("keep")
+        check(
+            "uninstall preserves unowned host file",
+            installer.uninstall(str(root), "claude") == 0 and foreign.read_text() == "keep",
+        )
+
+
+def test_installer_hardening_regressions() -> None:
+    """Focused hardening checks for the skills-only installer transaction boundary."""
+    print("\ninstaller hardening regressions")
+    from ai_research_skills import hook_adapters, hosts, installer
+
+    def files_snapshot(root: pathlib.Path) -> dict[str, bytes]:
+        return {
+            path.relative_to(root).as_posix(): path.read_bytes()
+            for path in root.rglob("*")
+            if path.is_file()
+        }
+
+    with tempfile.TemporaryDirectory() as raw:
+        root = pathlib.Path(raw)
+        conflict = root / ".claude" / "skills" / "ars-survey" / "SKILL.md"
+        conflict.parent.mkdir(parents=True)
+        conflict.write_text("foreign")
+        before = files_snapshot(root)
+        result = installer.install(raw, "claude")
+        check(
+            "hardening same-name conflict is zero-write",
+            result != 0
+            and files_snapshot(root) == before
+            and not (root / installer.MANIFEST_REL).exists(),
+        )
+
+    with tempfile.TemporaryDirectory() as raw:
+        root = pathlib.Path(raw)
+        installer.install(raw, "claude")
+        manifest_path = root / installer.MANIFEST_REL
+        manifest = json.loads(manifest_path.read_text())
+        manifest["hosts"]["claude"]["files"]["tampered"] = "0" * 64
+        manifest_path.write_text(json.dumps(manifest))
+        before = files_snapshot(root)
+        check(
+            "hardening manifest tamper rejects with zero-write",
+            installer.install(raw, "claude") != 0
+            and installer.uninstall(raw, "claude") != 0
+            and files_snapshot(root) == before,
+        )
+
+    with tempfile.TemporaryDirectory() as raw:
+        root = pathlib.Path(raw)
+        settings_path = root / ".claude" / "settings.json"
+        settings_path.parent.mkdir(parents=True)
+        settings_path.write_text("{bad")
+        before = files_snapshot(root)
+        check(
+            "hardening invalid foreign JSON is untouched",
+            installer.install(raw, "claude") == 0
+            and files_snapshot(root) != before
+            and settings_path.read_bytes() == b"{bad",
+            "fresh skills-only install must not parse or rewrite foreign settings",
+        )
+
+    with tempfile.TemporaryDirectory() as raw:
+        root = pathlib.Path(raw)
+        real = root / "real"
+        real.mkdir()
+        symlink_root = root / "project"
+        symlink_root.symlink_to(real, target_is_directory=True)
+        ancestor = root / "ancestor"
+        ancestor.mkdir()
+        (ancestor / ".claude").symlink_to(real, target_is_directory=True)
+        check(
+            "hardening symlink root and ancestor reject",
+            installer.install(str(symlink_root), "claude") != 0
+            and installer.install(str(ancestor), "claude") != 0
+            and not (real / installer.MANIFEST_REL).exists(),
+        )
+
+    with tempfile.TemporaryDirectory() as raw:
+        root = pathlib.Path(raw)
+        original_atomic = installer._atomic_write
+        calls = {"count": 0}
+
+        def fail_transaction(path: str, data: bytes, mode: int = 0o644) -> None:
+            calls["count"] += 1
+            if calls["count"] == 3:
+                raise OSError("injected transaction fault")
+            original_atomic(path, data, mode)
+
+        installer._atomic_write = fail_transaction
+        try:
+            result = installer.install(raw, "claude")
+        finally:
+            installer._atomic_write = original_atomic
+        check(
+            "hardening transaction fault rolls back package output",
+            result != 0 and not (root / installer.MANIFEST_REL).exists(),
+        )
+
+    with tempfile.TemporaryDirectory() as raw:
+        root = pathlib.Path(raw)
+        original_atomic = installer._atomic_write
+        calls = {"count": 0}
+
+        def interrupt_after_write(path: str, data: bytes, mode: int = 0o644) -> None:
+            calls["count"] += 1
+            original_atomic(path, data, mode)
+            if calls["count"] == 3:
+                raise KeyboardInterrupt("simulated process interruption")
+
+        installer._atomic_write = interrupt_after_write
+        interrupted = False
+        try:
+            installer.install(raw, "claude")
+        except KeyboardInterrupt:
+            interrupted = True
+        finally:
+            installer._atomic_write = original_atomic
+        journal = root / installer.JOURNAL_REL
+        check(
+            "hardening interrupted transaction leaves journal",
+            interrupted and journal.exists(),
+        )
+        check(
+            "hardening next process recovers journal",
+            installer.install(raw, "claude") == 0 and not journal.exists(),
+        )
 
     with tempfile.TemporaryDirectory() as raw:
         root = pathlib.Path(raw)
         target = root / "snapshot.txt"
         target.write_text("before")
-        _ = installer._Transaction(str(root), [str(target)])
+        installer._Transaction(raw, [str(target)])
         target.write_text("after")
         original_atomic = installer._atomic_write
         failed_once = {"value": False}
@@ -1190,66 +1458,23 @@ def test_hardening_regressions() -> None:
         installer._atomic_write = fail_restore
         try:
             try:
-                installer._recover_journal(str(root))
+                installer._recover_journal(raw)
             except installer.InstallerError as exc:
-                first_recovery_error = str(exc)
+                recovery_error = str(exc)
             else:
-                first_recovery_error = ""
+                recovery_error = ""
         finally:
             installer._atomic_write = original_atomic
-        journal = root / ".ai-research-skills" / "transaction.json"
+        journal = root / installer.JOURNAL_REL
         check(
-            "failed snapshot recovery reports error and retains journal",
-            bool(first_recovery_error)
-            and "sealed journal retained" in first_recovery_error
-            and journal.exists(),
+            "hardening failed snapshot recovery retains sealed journal",
+            "sealed journal retained" in recovery_error and journal.exists(),
         )
-        installer._recover_journal(str(root))
+        installer._recover_journal(raw)
         check(
-            "next recovery restores snapshot and seals completion",
+            "hardening later snapshot recovery completes",
             target.read_text() == "before" and not journal.exists(),
         )
-
-    with tempfile.TemporaryDirectory() as raw:
-        root = pathlib.Path(raw)
-        target = root / "atomic.txt"
-        original_open = installer.os.open
-        original_fsync = installer.os.fsync
-
-        def unsupported_open(path: str | bytes, flags: int, mode: int = 0o777) -> int:
-            if os.path.isdir(path):
-                raise OSError("directory open unsupported")
-            return original_open(path, flags, mode)
-
-        def unsupported_fsync(fd: int) -> None:
-            if installer.stat.S_ISDIR(installer.os.fstat(fd).st_mode):
-                raise OSError("directory fsync unsupported")
-            original_fsync(fd)
-
-        try:
-            for kind in ("open", "fsync"):
-                target.write_bytes(b"before")
-                installer.os.open = unsupported_open if kind == "open" else original_open
-                installer.os.fsync = (
-                    unsupported_fsync if kind == "fsync" else original_fsync
-                )
-                try:
-                    installer._atomic_write(str(target), b"after")
-                    installer._Transaction(str(root), [str(root / "transaction-target")])
-                    installer._recover_journal(str(root))
-                    durable_result = (
-                        target.read_bytes() == b"after"
-                        and not (root / ".ai-research-skills" / "transaction.json").exists()
-                    )
-                except Exception:
-                    durable_result = False
-                check(
-                    f"directory {kind} sync failure does not wedge transaction",
-                    durable_result,
-                )
-        finally:
-            installer.os.open = original_open
-            installer.os.fsync = original_fsync
 
     with tempfile.TemporaryDirectory() as raw:
         root = pathlib.Path(raw)
@@ -1257,1361 +1482,162 @@ def test_hardening_regressions() -> None:
         fake_stat = type("FakeStat", (), {"st_dev": 7, "st_ino": 11})()
         installer.os.stat = lambda _path: fake_stat
         try:
-            existing_one = installer._project_root_identity(str(root / "Project"))
-            existing_two = installer._project_root_identity(str(root / "project"))
-            lock_one = installer._ProjectLock(str(root / "Project")).path
-            lock_two = installer._ProjectLock(str(root / "project")).path
+            one = installer._ProjectLock(str(root / "Project"))
+            two = installer._ProjectLock(str(root / "project"))
         finally:
             installer.os.stat = original_stat
-        check(
-            "existing case aliases share filesystem project lock identity",
-            existing_one == existing_two and lock_one == lock_two,
-        )
-
-        installer.os.stat = lambda _path: (_ for _ in ()).throw(FileNotFoundError())
-        try:
-            missing_one = installer._project_path_identity(str(root / "MissingProject"))
-            missing_two = installer._project_path_identity(str(root / "missingproject"))
-            missing_lock_one = installer._project_path_lock(
-                str(root / "MissingProject")
-            ).path
-            missing_lock_two = installer._project_path_lock(
-                str(root / "missingproject")
-            ).path
-        finally:
-            installer.os.stat = original_stat
-        check(
-            "missing case aliases share conservative path lock identity",
-            missing_one == missing_two
-            and missing_lock_one == missing_lock_two
-            and missing_one.startswith("path:"),
-        )
-
-        lock_code = (
-            "import sys\n"
-            f"sys.path.insert(0, {str(SRC)!r})\n"
-            "from ai_research_skills import installer\n"
-            f"print(installer._ProjectLock({str(root / 'process-project')!r}).path)\n"
-        )
-        if os.name == "nt":
-            check("POSIX lock path ignores per-process TMPDIR", True)
-        else:
-            with (
-                tempfile.TemporaryDirectory() as tmp_one,
-                tempfile.TemporaryDirectory() as tmp_two,
-            ):
-                lock_outputs: list[str] = []
-                lock_smoke_ok = True
-                for tmpdir in (tmp_one, tmp_two):
-                    lock_env = dict(os.environ)
-                    lock_env["TMPDIR"] = tmpdir
-                    lock_env["PYTHONPATH"] = str(SRC)
-                    lock_process = subprocess.run(
-                        [sys.executable, "-c", lock_code],
-                        env=lock_env,
-                        capture_output=True,
-                        text=True,
-                    )
-                    lock_smoke_ok = lock_smoke_ok and lock_process.returncode == 0
-                    lock_outputs.append(lock_process.stdout.strip())
-                check(
-                    "different TMPDIR processes share one stable lock path",
-                    lock_smoke_ok
-                    and len(lock_outputs) == 2
-                    and lock_outputs[0] == lock_outputs[1],
-                )
-
-        stable_root = root / "StableProject"
-        path_before = installer._project_path_lock(str(stable_root))
-        stable_root.mkdir()
-        path_after = installer._project_path_lock(str(stable_root))
-        inode_lock = installer._project_lock(str(stable_root))
-        check(
-            "stable path lock survives root creation before inode lock",
-            path_before.identity == path_after.identity
-            and path_before.path == path_after.path
-            and path_before.identity.startswith("path:")
-            and inode_lock.identity.startswith("stat:"),
-        )
+        check("hardening lock identity is stable across aliases", one.path == two.path)
 
     with tempfile.TemporaryDirectory() as raw:
-        # Start with a genuinely absent root.  One waiter constructs the path lock
-        # before creation; a second operation constructs the inode lock after creation.
-        root = pathlib.Path(raw) / "missing-project"
-        ensuring = threading.Event()
-        allow_create = threading.Event()
-        entered = threading.Event()
-        release = threading.Event()
-        calls: list[str] = []
-        results: list[int] = []
-        original_ensure = installer._ensure_install_root
-        original_recover = installer._recover_journal
-        original_project_lock = installer._project_lock
-        original_project_path_lock = installer._project_path_lock
-        stale_constructed = threading.Event()
-        stale_identities: list[str] = []
-        path_attempted = threading.Event()
-        inode_attempted = threading.Event()
-
-        def blocked_ensure(project_root: str) -> bool:
-            ensuring.set()
-            allow_create.wait(2)
-            return original_ensure(project_root)
-
-        def blocked_recover(project_root: str) -> None:
-            calls.append(project_root)
-            if len(calls) == 1:
-                entered.set()
-                release.wait(2)
-
-        class ObservedLock:
-            def __init__(self, lock: Any, on_enter: Any) -> None:
-                self.lock = lock
-                self.identity = lock.identity
-                self.on_enter = on_enter
-
-            def __enter__(self) -> Any:
-                self.on_enter()
-                return self.lock.__enter__()
-
-            def __exit__(self, *args: Any) -> Any:
-                return self.lock.__exit__(*args)
-
-        def tracked_project_path_lock(project_root: str) -> Any:
-            lock = original_project_path_lock(project_root)
-            name = threading.current_thread().name
-            if name == "stale-waiter":
-                stale_identities.append(lock.identity)
-                stale_constructed.set()
-            if name == "inode-waiter":
-                return ObservedLock(lock, path_attempted.set)
-            return lock
-
-        def tracked_project_lock(project_root: str) -> Any:
-            lock = original_project_lock(project_root)
-            if threading.current_thread().name == "inode-waiter":
-                return ObservedLock(lock, inode_attempted.set)
-            return lock
-
-        def run_install(host: str) -> None:
-            results.append(installer.install(str(root), host))
-
-        installer._ensure_install_root = blocked_ensure
-        installer._recover_journal = blocked_recover
-        installer._project_path_lock = tracked_project_path_lock
-        installer._project_lock = tracked_project_lock
-        try:
-            first = threading.Thread(target=run_install, args=("claude",), name="creator")
-            stale_waiter = threading.Thread(
-                target=run_install, args=("pi",), name="stale-waiter"
-            )
-            first.start()
-            check(
-                "missing-root first operation reaches root creation",
-                ensuring.wait(1),
-            )
-            stale_waiter.start()
-            check(
-                "stale waiter constructs path identity before root creation",
-                stale_constructed.wait(1)
-                and bool(stale_identities)
-                and stale_identities[0].startswith("path:")
-                and not root.exists(),
-            )
-            allow_create.set()
-            check(
-                "missing-root first operation enters critical section",
-                entered.wait(2),
-            )
-            second = threading.Thread(
-                target=run_install, args=("cursor",), name="inode-waiter"
-            )
-            second.start()
-            check(
-                "path-lock waiter attempts lock during first critical section",
-                path_attempted.wait(1) and len(calls) == 1,
-            )
-            release.set()
-            first.join(10)
-            stale_waiter.join(10)
-            second.join(10)
-            check(
-                "path-lock waiter acquires inode lock after promotion",
-                inode_attempted.is_set(),
-            )
-        finally:
-            release.set()
-            allow_create.set()
-            installer._ensure_install_root = original_ensure
-            installer._recover_journal = original_recover
-            installer._project_path_lock = original_project_path_lock
-            installer._project_lock = original_project_lock
-        check(
-            "missing-root concurrent installs retain every manifest record",
-            len(results) == 3
-            and all(result == 0 for result in results)
-            and set(
-                json.loads((root / ".ai-research-skills" / "manifest.json").read_text())[
-                    "hosts"
-                ]
-            )
-            == {"claude", "pi", "cursor"},
-        )
-
-    with tempfile.TemporaryDirectory() as raw:
-        root = pathlib.Path(raw) / "exception-project"
-        creator_ensuring = threading.Event()
-        allow_create = threading.Event()
-        failure_entered = threading.Event()
-        release_failure = threading.Event()
-        waiter_constructed = threading.Event()
-        waiter_checked = threading.Event()
-        waiter_saw_missing: list[bool] = []
-        waiter_identities: list[str] = []
-        exception_results: dict[str, int] = {}
-        original_ensure = installer._ensure_install_root
-        original_build = installer._build_plan
-        original_project_path_lock = installer._project_path_lock
-
-        def blocked_ensure(project_root: str) -> bool:
-            name = threading.current_thread().name
-            if name == "exception-creator":
-                creator_ensuring.set()
-                allow_create.wait(2)
-            if name == "exception-waiter":
-                waiter_saw_missing.append(not os.path.lexists(project_root))
-                waiter_checked.set()
-            return original_ensure(project_root)
-
-        def failing_build(
-            project_root: str, selected: tuple[Any, ...], uninstall: bool
-        ) -> dict[str, Any]:
-            if threading.current_thread().name == "exception-creator":
-                failure_entered.set()
-                release_failure.wait(2)
-                raise installer.InstallerError("injected planning failure")
-            return original_build(project_root, selected, uninstall)
-
-        def tracked_project_path_lock(project_root: str) -> Any:
-            lock = original_project_path_lock(project_root)
-            if threading.current_thread().name == "exception-waiter":
-                waiter_identities.append(lock.identity)
-                waiter_constructed.set()
-            return lock
-
-        def run_creator() -> None:
-            exception_results["creator"] = installer.install(str(root), "claude")
-
-        def run_waiter() -> None:
-            exception_results["waiter"] = installer.install(str(root), "pi")
-
-        installer._ensure_install_root = blocked_ensure
-        installer._build_plan = failing_build
-        installer._project_path_lock = tracked_project_path_lock
-        try:
-            creator = threading.Thread(target=run_creator, name="exception-creator")
-            waiter = threading.Thread(target=run_waiter, name="exception-waiter")
-            creator.start()
-            check("exception creator reaches root creation", creator_ensuring.wait(1))
-            waiter.start()
-            check(
-                "exception waiter constructs path identity before creation",
-                waiter_constructed.wait(1)
-                and bool(waiter_identities)
-                and waiter_identities[0].startswith("path:")
-                and not root.exists(),
-            )
-            allow_create.set()
-            check("exception creator reaches injected failure", failure_entered.wait(2))
-            release_failure.set()
-            creator.join(10)
-            waiter.join(10)
-        finally:
-            allow_create.set()
-            release_failure.set()
-            installer._ensure_install_root = original_ensure
-            installer._build_plan = original_build
-            installer._project_path_lock = original_project_path_lock
-        check(
-            "exception cleanup happens before waiter creates root",
-            exception_results.get("creator") == 1
-            and exception_results.get("waiter") == 0
-            and waiter_checked.is_set()
-            and waiter_saw_missing == [True]
-            and (root / ".ai-research-skills" / "manifest.json").exists(),
-        )
-
-    with tempfile.TemporaryDirectory() as raw:
-        root = pathlib.Path(raw) / "three-thread-project"
-        host = hosts.lookup("claude")
-        if host is None:
-            raise AssertionError("claude host is unavailable")
-        thread_host = host
-        creator_ensuring = threading.Event()
-        allow_create = threading.Event()
-        root_created = threading.Event()
-        failure_entered = threading.Event()
-        release_failure = threading.Event()
-        remover_constructed = threading.Event()
-        remover_entered = threading.Event()
-        writer_constructed = threading.Event()
-        writer_attempted = threading.Event()
-        cleanup_done = threading.Event()
-        remover_cleanup_at_entry: list[bool] = []
-        remover_root_at_entry: list[bool] = []
-        thread_results: dict[str, Any] = {}
-        original_ensure = installer._ensure_install_root
-        original_build = installer._build_plan
-        original_path_lock = installer._project_path_lock
-        original_rmdir = installer.os.rmdir
-
-        class ObservedPathLock:
-            def __init__(self, lock: Any, *, before: Any = None, after: Any = None) -> None:
-                self.lock = lock
-                self.identity = lock.identity
-                self.before = before
-                self.after = after
-
-            def __enter__(self) -> Any:
-                if self.before is not None:
-                    self.before()
-                entered = self.lock.__enter__()
-                if self.after is not None:
-                    self.after()
-                return entered
-
-            def __exit__(self, *args: Any) -> Any:
-                return self.lock.__exit__(*args)
-
-        def blocked_ensure(project_root: str) -> bool:
-            if threading.current_thread().name == "three-thread-creator":
-                creator_ensuring.set()
-                allow_create.wait(2)
-            created = original_ensure(project_root)
-            if threading.current_thread().name == "three-thread-creator" and created:
-                root_created.set()
-            return created
-
-        def failing_build(
-            project_root: str, selected: tuple[Any, ...], uninstall: bool
-        ) -> dict[str, Any]:
-            if threading.current_thread().name == "three-thread-creator":
-                failure_entered.set()
-                release_failure.wait(2)
-                raise installer.InstallerError("injected three-thread planning failure")
-            return original_build(project_root, selected, uninstall)
-
-        def tracked_path_lock(project_root: str) -> Any:
-            lock = original_path_lock(project_root)
-            name = threading.current_thread().name
-            if name == "three-thread-remover":
-                remover_constructed.set()
-                return ObservedPathLock(
-                    lock,
-                    after=lambda: (
-                        remover_cleanup_at_entry.append(cleanup_done.is_set()),
-                        remover_root_at_entry.append(os.path.lexists(project_root)),
-                        remover_entered.set(),
-                    ),
-                )
-            if name == "three-thread-writer":
-                writer_constructed.set()
-                return ObservedPathLock(lock, before=writer_attempted.set)
-            return lock
-
-        def tracked_rmdir(path: str) -> None:
-            original_rmdir(path)
-            if os.path.abspath(path) == os.path.abspath(root):
-                cleanup_done.set()
-
-        def run_creator() -> None:
-            thread_results["creator"] = installer.install(str(root), "claude")
-
-        def run_writer() -> None:
-            try:
-                thread_results["writer"] = installer.install_files(str(root), thread_host)
-            except BaseException as exc:
-                thread_results["writer_error"] = repr(exc)
-
-        def run_remover() -> None:
-            try:
-                installer.remove_files(str(root), thread_host)
-                thread_results["remover"] = None
-            except BaseException as exc:
-                thread_results["remover_error"] = repr(exc)
-
-        creator = threading.Thread(target=run_creator, name="three-thread-creator")
-        remover = threading.Thread(target=run_remover, name="three-thread-remover")
-        writer = threading.Thread(target=run_writer, name="three-thread-writer")
-        installer._ensure_install_root = blocked_ensure
-        installer._build_plan = failing_build
-        installer._project_path_lock = tracked_path_lock
-        installer.os.rmdir = tracked_rmdir
-        try:
-            creator.start()
-            check(
-                "three-thread creator reaches pre-create ensure",
-                creator_ensuring.wait(1),
-            )
-            remover.start()
-            check(
-                "stale remove_files constructs stable path lock before creation",
-                remover_constructed.wait(1) and not root.exists(),
-            )
-            allow_create.set()
-            check("three-thread creator creates root", root_created.wait(2))
-            writer.start()
-            check(
-                "post-create install_files attempts stable path lock",
-                writer_constructed.wait(1) and writer_attempted.wait(1),
-            )
-            check(
-                "remover cannot enter while creator body is blocked",
-                failure_entered.wait(2) and not remover_entered.is_set(),
-            )
-            release_failure.set()
-            creator.join(10)
-            writer.join(10)
-            remover.join(10)
-            check(
-                "remover entered only after creator cleanup",
-                remover_entered.wait(2)
-                and cleanup_done.is_set()
-                and remover_cleanup_at_entry == [True],
-            )
-        finally:
-            allow_create.set()
-            release_failure.set()
-            creator.join(10)
-            writer.join(10)
-            remover.join(10)
-            installer._ensure_install_root = original_ensure
-            installer._build_plan = original_build
-            installer._project_path_lock = original_path_lock
-            installer.os.rmdir = original_rmdir
-        check(
-            "three-thread lock protocol preserves creator/writer/remover outcomes",
-            thread_results.get("creator") == 1
-            and thread_results.get("writer_error") is None
-            and thread_results.get("remover_error") is None
-            and cleanup_done.is_set()
-            and len(remover_root_at_entry) == 1,
-        )
-
-    with tempfile.TemporaryDirectory() as raw:
-        root = pathlib.Path(raw) / "compatibility-project"
-        host = hosts.lookup("claude")
-        if host is None:
-            raise AssertionError("claude host is unavailable")
-        thread_host = host
-        creator_ensuring = threading.Event()
-        allow_create = threading.Event()
-        helper_constructed = threading.Event()
-        helper_path_identities: list[str] = []
-        helper_inode_identities: list[str] = []
-        creator_result: list[int] = []
-        helper_result: list[list[str]] = []
-        original_ensure = installer._ensure_install_root
-        original_project_path_lock = installer._project_path_lock
-        original_project_lock = installer._project_lock
-
-        def blocked_ensure(project_root: str) -> bool:
-            if threading.current_thread().name == "compatibility-creator":
-                creator_ensuring.set()
-                allow_create.wait(2)
-            return original_ensure(project_root)
-
-        def tracked_project_path_lock(project_root: str) -> Any:
-            lock = original_project_path_lock(project_root)
-            if threading.current_thread().name == "compatibility-helper":
-                helper_path_identities.append(lock.identity)
-                helper_constructed.set()
-            return lock
-
-        def tracked_project_lock(project_root: str) -> Any:
-            lock = original_project_lock(project_root)
-            if threading.current_thread().name == "compatibility-helper":
-                helper_inode_identities.append(lock.identity)
-            return lock
-
-        def run_creator() -> None:
-            creator_result.append(installer.install(str(root), "claude"))
-
-        def run_helper() -> None:
-            helper_result.append(installer.install_files(str(root), thread_host))
-
-        installer._ensure_install_root = blocked_ensure
-        installer._project_path_lock = tracked_project_path_lock
-        installer._project_lock = tracked_project_lock
-        try:
-            creator = threading.Thread(target=run_creator, name="compatibility-creator")
-            helper = threading.Thread(target=run_helper, name="compatibility-helper")
-            creator.start()
-            check("compatibility creator reaches root creation", creator_ensuring.wait(1))
-            helper.start()
-            check(
-                "compatibility helper constructs path identity before creation",
-                helper_constructed.wait(1)
-                and bool(helper_path_identities)
-                and helper_path_identities[0].startswith("path:")
-                and not root.exists(),
-            )
-            allow_create.set()
-            creator.join(10)
-            helper.join(10)
-        finally:
-            allow_create.set()
-            installer._ensure_install_root = original_ensure
-            installer._project_path_lock = original_project_path_lock
-            installer._project_lock = original_project_lock
-        check(
-            "compatibility helper holds path then inode locks",
-            creator_result == [0]
-            and bool(helper_result)
-            and bool(helper_result[0])
-            and bool(helper_path_identities)
-            and any(identity.startswith("stat:") for identity in helper_inode_identities),
-        )
         missing = pathlib.Path(raw) / "missing-uninstall"
         check(
-            "uninstall missing root does not create it",
+            "hardening missing-root uninstall is a no-op without creation",
             installer.uninstall(str(missing), "claude") == 0 and not missing.exists(),
         )
-        installer.remove_files(str(missing), thread_host)
-        check("remove_files missing root does not create it", not missing.exists())
-
-
-def test_doctor() -> None:
-    print("\ndoctor")
-    from ai_research_skills import hosts, installer
 
     with tempfile.TemporaryDirectory() as raw:
         root = pathlib.Path(raw)
-        check("doctor empty project is nonzero", installer.doctor(str(root), "claude") == 1)
+        hooks = root / ".claude" / "hooks"
+        hooks.mkdir(parents=True)
         check(
-            "doctor sees clean install",
-            installer.install(str(root), "claude,pi") == 0
-            and installer.doctor(str(root), "claude,pi") == 0,
-        )
-        settings_path = root / ".claude" / "settings.json"
-        settings = json.loads(settings_path.read_text())
-        settings["hooks"]["PreToolUse"][0]["hooks"][0]["command"] += " --tampered"
-        settings_path.write_text(json.dumps(settings))
-        check(
-            "doctor detects modified managed handler",
-            installer.doctor(str(root), "claude") != 0,
+            "hardening foreign empty hooks directory survives uninstall",
+            installer.install(raw, "claude") == 0
+            and installer.uninstall(raw, "claude") == 0
+            and hooks.exists(),
         )
 
     with tempfile.TemporaryDirectory() as raw:
         root = pathlib.Path(raw)
-        marker = root / "doctor-ran-marker"
-        skill = root / ".claude" / "skills" / "ars-survey"
-        skill.mkdir(parents=True)
-        (skill / "SKILL.md").write_text("marker skill")
-        fake = root / ".claude" / "ai-research-skills" / "scripts" / "rs_validate.py"
-        fake.parent.mkdir(parents=True)
-        fake.write_text(
-            f"from pathlib import Path\nPath({str(marker)!r}).write_text('ran')\n"
-        )
-        check(
-            "doctor never executes fake validator without manifest",
-            installer.doctor(str(root), "claude") != 0 and not marker.exists(),
-        )
-
-    with tempfile.TemporaryDirectory() as raw:
-        root = pathlib.Path(raw)
-        marker = root / "doctor-ran-marker"
-        check(
-            "clean install remains doctor-valid",
-            installer.install(str(root), "claude") == 0,
-        )
-        host = hosts.lookup("claude")
+        host = hosts.lookup("cursor")
         assert host is not None
-        malicious = root / "malicious-python"
-        malicious.mkdir()
-        (malicious / "sitecustomize.py").write_text(
-            f"from pathlib import Path\nPath({str(marker)!r}).write_text('ran')\n"
-        )
-        saved_python_env = {
-            name: os.environ.get(name)
-            for name in (
-                "PYTHONPATH",
-                "PYTHONHOME",
-                "PYTHONSTARTUP",
-                "PYTHONUSERBASE",
-            )
+        historical_command = hook_adapters.historical_command_forms(
+            host, "absence_claim_guard.py"
+        )[0]
+        settings = {
+            "version": 1,
+            "foreign_top": {"keep": True},
+            "hooks": {
+                "preToolUse": [
+                    {
+                        "matcher": "Other",
+                        "foreign_group": True,
+                        "hooks": [{"type": "command", "command": "foreign-pre"}],
+                    }
+                ],
+                "postToolUse": [
+                    {
+                        "matcher": "Write|Edit",
+                        "metadata": "keep",
+                        "hooks": [
+                            {
+                                "type": "command",
+                                "command": historical_command,
+                                "timeout": 10,
+                            },
+                            {
+                                "type": "command",
+                                "command": historical_command,
+                                "timeout": 999,
+                            },
+                            {"type": "command", "command": "foreign-post"},
+                        ],
+                    }
+                ],
+            },
         }
-        try:
-            os.environ["PYTHONPATH"] = str(malicious)
-            os.environ["PYTHONHOME"] = str(malicious)
-            os.environ["PYTHONSTARTUP"] = str(malicious / "startup.py")
-            os.environ["PYTHONUSERBASE"] = str(malicious)
-            trusted_ok = installer._verify_installed_validator(str(root), host)
-        finally:
-            for name, value in saved_python_env.items():
-                if value is None:
-                    os.environ.pop(name, None)
-                else:
-                    os.environ[name] = value
-        check(
-            "doctor trusted fallback ignores PYTHONPATH and sitecustomize",
-            trusted_ok and not marker.exists(),
+        settings_path = root / ".cursor" / "hooks.json"
+        settings_path.parent.mkdir(parents=True)
+        settings_path.write_text(json.dumps(settings))
+        cleaned, removed, modified = hook_adapters.cleanup(
+            settings,
+            host,
+            root=str(root),
+            allow_legacy=True,
         )
-        fake_python = root / "fake-python"
-        fake_python.write_text(f"#!/bin/sh\nprintf ran > {str(marker)!r}\nexit 0\n")
-        fake_python.chmod(0o755)
-        original_executable = installer.sys.executable
-        try:
-            installer.sys.executable = str(fake_python)
-            polluted_executable_ok = installer._verify_installed_validator(str(root), host)
-        finally:
-            installer.sys.executable = original_executable
-        check(
-            "doctor ignores PYTHONEXECUTABLE-polluted sys.executable",
-            polluted_executable_ok and not marker.exists(),
-        )
-        sys_module: Any = installer.sys
-        original_base_executable = getattr(sys_module, "_base_executable", None)
-        had_base_executable = hasattr(sys_module, "_base_executable")
-
-        def verify_with_base(candidate: str) -> bool:
-            try:
-                sys_module._base_executable = candidate
-                return installer._verify_installed_validator(str(root), host)
-            finally:
-                if had_base_executable:
-                    sys_module._base_executable = original_base_executable
-                else:
-                    delattr(sys_module, "_base_executable")
-
-        echo_candidate = installer._trusted_executable("/bin/echo")
-        echo_base_ok = verify_with_base("/bin/echo")
-        check(
-            "doctor rejects /bin/echo as an untrusted base executable",
-            echo_candidate is None and echo_base_ok is False and not marker.exists(),
-        )
-        fake_candidate = installer._trusted_executable(str(fake_python))
-        fake_base_ok = verify_with_base(str(fake_python))
-        check(
-            "doctor rejects a project fake executable without running it",
-            fake_candidate is None and fake_base_ok is False and not marker.exists(),
-        )
-        no_trusted_executable_ok = verify_with_base(str(root / "missing-base-python"))
-        check(
-            "doctor fails closed without a trusted interpreter",
-            no_trusted_executable_ok is False and not marker.exists(),
-        )
-
-        trusted_python = installer._trusted_python_executable()
-        check(
-            "real base interpreter passes static trust proof",
-            trusted_python is not None
-            and installer._trusted_executable(trusted_python) == trusted_python,
-        )
-        smoke_env = dict(os.environ)
-        smoke_env["PYTHONEXECUTABLE"] = str(fake_python)
-        smoke_env["PYTHONPATH"] = str(SRC)
-        smoke_code = (
-            "from ai_research_skills import hosts, installer\n"
-            f"raise SystemExit(0 if installer._verify_installed_validator({str(root)!r}, "
-            "hosts.lookup('claude')) else 1)\n"
-        )
-        smoke = (
-            subprocess.run(
-                [trusted_python, "-c", smoke_code],
-                env=smoke_env,
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
-            if trusted_python is not None
-            else None
-        )
-        check(
-            "doctor subprocess smoke survives PYTHONEXECUTABLE",
-            smoke is not None and smoke.returncode == 0 and not marker.exists(),
-            "" if smoke is None else smoke.stdout + smoke.stderr,
-        )
-        validator = root / ".claude" / "ai-research-skills" / "scripts" / "rs_validate.py"
-        validator.write_text(
-            f"from pathlib import Path\nPath({str(marker)!r}).write_text('ran')\n"
-        )
-        check(
-            "doctor does not execute tampered installed validator",
-            installer.doctor(str(root), "claude") != 0 and not marker.exists(),
-        )
-
-
-# --------------------------------------------------------------------------- phase-aware validator fixtures
-
-
-def _base_protocol(phase: int) -> str:
-    lines = [
-        "topic: demo-topic",
-        'question: "Which method improves multi-hop retrieval under a fixed budget?"',
-        "created: 2026-01-01",
-        f"phase: {phase}",
-        "scope:",
-        "  in: [multi-hop QA]",
-        "  out: [single-hop QA]",
-        "axes:",
-        "  - name: method",
-        "    values: [iterative, long-context]",
-        "  - name: control",
-        "    values: [none, fixed recall]",
-        "  - name: evaluation",
-        "    values: [2-hop, 3+-hop]",
-    ]
-    if phase >= 1:
-        lines += [
-            "recall_modes:",
-            "  keyword: [{tool: search, q: one}]",
-            "  citation_chain: [{tool: graph, seed: W1}]",
-            "  venue_author: [{tool: sweep, venue: ICLR}]",
-            "  contrarian: [{tool: search, q: opposing}]",
+        all_entries = [entry for entries in cleaned["hooks"].values() for entry in entries]
+        historical_entries = [
+            entry for entry in all_entries if entry.get("command") == historical_command
         ]
-    if phase >= 2:
-        lines += [
-            "screen:",
-            "  include: [relevant]",
-            "  exclude: [irrelevant]",
-            "  relevance_threshold: 6",
-        ]
-    if phase >= 5:
-        lines += [
-            "last_searched_at: 2026-01-02",
-            "saturation:",
-            "  rounds: 1",
-            "  new_on_topic_last_round: 0",
-            "  stop_rule: no new records",
-        ]
-    return "\n".join(lines) + "\n"
-
-
-def _write_phase(directory: pathlib.Path, phase: int) -> None:
-    directory.mkdir(parents=True, exist_ok=True)
-    (directory / "protocol.yml").write_text(_base_protocol(phase))
-    if phase == 0:
-        return
-    record: dict[str, Any] = {
-        "key": "alpha2025x",
-        "id": "arXiv:2500.00001",
-        "title": "A paper",
-        "found_via": ["keyword:r1"],
-        "relevance": 8,
-        "screen": "include",
-        "accessed": "2026-01-02",
-    }
-    if phase >= 2:
-        record["contextual_summary"] = "A summary against the question."
-    if phase >= 3:
-        record.update(
-            {
-                "claim": "The method improves the benchmark under the stated control.",
-                "evidence_read": "full",
-                "axes": {"method": "iterative", "control": "none", "evaluation": "2-hop"},
-                "code": {"status": "none"},
-            }
+        check(
+            "hardening Cursor cleanup removes exact ARS and preserves modified handler",
+            len(historical_entries) == 1
+            and historical_entries[0].get("timeout") == 999
+            and "absence_claim_guard.py" in modified
+            and "absence_claim_guard.py" not in removed,
         )
-    (directory / "corpus.jsonl").write_text(json.dumps(record) + "\n")
-    (directory / "log.md").write_text("keyword citation_chain venue_author contrarian\n")
-    if phase >= 1:
-        counts = ["counts:", "  retrieved: 1", "  deduped: 1"]
-        if phase >= 2:
-            counts += [
-                "  adjudicated: 1",
-                "  scored_at_or_above_threshold: 1",
-                "  unsure: 0",
-            ]
-        if phase >= 3:
-            counts += ["  fulltext_kept: 1"]
-        with (directory / "protocol.yml").open("a") as fh:
-            fh.write("\n" + "\n".join(counts) + "\n")
-    if phase >= 3:
-        (directory / "refs.bib").write_text(
-            "% rs-provenance: key=alpha2025x id=arXiv:2500.00001 tool=arxiv.export_citations date=2026-01-02\n"
-            "@article{alpha2025x, title={A paper}}\n"
+        check(
+            "hardening Cursor legacy cleanup directifies every sibling",
+            all("hooks" not in entry and "type" not in entry for entry in all_entries)
+            and any(entry.get("command") == "foreign-pre" for entry in all_entries)
+            and any(entry.get("command") == "foreign-post" for entry in all_entries),
         )
-    if phase >= 4:
-        cells: list[str] = []
-        values = [
-            ("iterative", "none"),
-            ("iterative", "fixed recall"),
-            ("long-context", "none"),
-            ("long-context", "fixed recall"),
-        ]
-        for method, control in values:
-            for evaluation in ("2-hop", "3+-hop"):
-                occupied = (
-                    method == "iterative" and control == "none" and evaluation == "2-hop"
-                )
-                gap = (
-                    method == "iterative"
-                    and control == "fixed recall"
-                    and evaluation == "2-hop"
-                )
-                cells += [
-                    f"  - coords: {{method: {method}, control: {control}, evaluation: {evaluation}}}",
-                    f"    occupants: [{'alpha2025x' if occupied else ''}]",
-                    f"    state: {'occupied' if occupied else ('unexplored' if gap else 'undecided')}",
-                ]
-                if gap:
-                    cells.append("    trend_evidence: live neighbour")
-                    cells.append("    gap_id: G1")
-        (directory / "coverage.yml").write_text(
-            "axes:\n  - name: method\n    values: [iterative, long-context]\n  - name: control\n    values: [none, fixed recall]\n  - name: evaluation\n    values: [2-hop, 3+-hop]\n"
-            "cells:\n"
-            + "\n".join(cells)
-            + "\nrecall_diagnostic:\n  includes_by_mode: {keyword: 1, citation_chain: 0, venue_author: 0, contrarian: 0}\n"
-        )
-        (directory / "gaps.yml").write_text(
-            "gaps:\n  - id: G1\n    statement: A testable missing comparison in the synthetic state.\n    type: unvalidated-comparison\n    evidence_of_absence:\n      queries_run: [one phrasing, two phrasing, three phrasing]\n      venues_swept: [ICLR@2025, ACL@2025, NeurIPS@2025]\n      nearest_prior_work:\n        - key: alpha2025x\n          why_not_it: It controls a different variable.\n          differing_axis: problem-setting\n      last_checked: 2026-01-02\n    confidence: medium\n    closes_if: A paper matches the missing controlled comparison.\n"
-        )
-
-
-def test_validator() -> None:
-    print("\nphase-aware validator")
-    with tempfile.TemporaryDirectory() as raw:
-        root = pathlib.Path(raw)
-        for phase in range(6):
-            directory = root / f"phase{phase}"
-            _write_phase(directory, phase)
-            rc, out = run_validator(directory, fallback=True)
-            check(f"phase {phase} minimal state is valid", rc == 0, out)
-        minimal = root / "phase1-minimal"
-        _write_phase(minimal, 1)
-        minimal_record = json.loads((minimal / "corpus.jsonl").read_text())
-        minimal_record.pop("relevance")
-        minimal_record.pop("screen")
-        (minimal / "corpus.jsonl").write_text(json.dumps(minimal_record) + "\n")
-        rc, out = run_validator(minimal, fallback=True)
-        check("Phase 1 minimal corpus contract omits Phase 2 fields", rc == 0, out)
-
-        for label, refs in (
-            ("empty", ""),
-            ("directives", "@comment{note}\n% comment only\n"),
-        ):
-            missing_refs = root / f"phase3-missing-{label}"
-            _write_phase(missing_refs, 3)
-            (missing_refs / "refs.bib").write_text(refs)
-            rc, out = run_validator(missing_refs, fallback=True)
-            strict_rc, strict_out = run_validator(missing_refs, fallback=True, strict=True)
-            check(
-                f"Phase 3 {label} refs warns for missing include",
-                rc == 0 and "has no BibTeX entry" in out,
-                out,
+        check(
+            "hardening Cursor cleanup retains matcher metadata and foreign config",
+            any(
+                entry.get("command") == "foreign-post"
+                and entry.get("matcher") == "Write|Edit"
+                for entry in all_entries
             )
-            check(
-                f"Phase 3 {label} refs is strict-nonzero",
-                strict_rc != 0 and "has no BibTeX entry" in strict_out,
-                strict_out,
-            )
-
-        no_include = root / "phase3-no-include"
-        _write_phase(no_include, 3)
-        no_include_record = json.loads((no_include / "corpus.jsonl").read_text())
-        no_include_record["screen"] = "exclude"
-        no_include_record["exclude_reason"] = "synthetic control"
-        (no_include / "corpus.jsonl").write_text(json.dumps(no_include_record) + "\n")
-        (no_include / "protocol.yml").write_text(
-            (no_include / "protocol.yml")
-            .read_text()
-            .replace("fulltext_kept: 1", "fulltext_kept: 0")
+            and cleaned["foreign_top"] == {"keep": True}
+            and "_ars_legacy_cursor_group_metadata" in cleaned,
         )
-        (no_include / "refs.bib").write_text("")
-        rc, out = run_validator(no_include, fallback=True, strict=True)
+        settings_path.write_text(json.dumps(cleaned))
         check(
-            "Phase 3 refs with no includes stays clean under strict",
-            rc == 0 and "has no BibTeX entry" not in out,
-            out,
+            "hardening Cursor cleanup remains safe for subsequent uninstall",
+            installer.uninstall(str(root), "cursor") == 0
+            and "foreign-post" in settings_path.read_text(),
         )
 
-        from ai_research_skills.assets.scripts import _yaml_subset
+    sys.path.insert(0, str(ASSETS / "scripts"))
+    from _yaml_subset import safe_load as fallback_yaml
 
-        quoted_yaml = "topic: 'bad''slug'\n"
-        fallback_value = _yaml_subset.safe_load(quoted_yaml)
-        check(
-            "fallback decodes YAML doubled single quote",
-            fallback_value == {"topic": "bad'slug"},
-        )
-        try:
-            import yaml as reference_yaml
-        except ImportError:
-            reference_yaml = None
-        if reference_yaml is not None:
-            check(
-                "fallback matches PyYAML doubled single quote",
-                fallback_value == reference_yaml.safe_load(quoted_yaml),
-            )
-        malformed_quote = False
-        try:
-            _yaml_subset.safe_load("topic: 'bad'slug'\n")
-        except _yaml_subset.YAMLSubsetError:
-            malformed_quote = True
-        check("fallback rejects unpaired YAML single quote", malformed_quote)
-
-        fragment_yaml = (
-            'quoted: "first # kept\n'
-            '  second # kept"\n'
-            "empty: ''\n"
-            'flow: [one, "two, # kept", three#kept] # outside\n'
-        )
-        fallback_fragments = _yaml_subset.safe_load(fragment_yaml)
-        check(
-            "fallback keeps quoted continuation hashes and flow punctuation",
-            fallback_fragments
-            == {
-                "quoted": "first # kept second # kept",
-                "empty": "",
-                "flow": ["one", "two, # kept", "three#kept"],
-            },
-        )
-        if reference_yaml is not None:
-            check(
-                "fallback matches PyYAML quoted and flow fragments",
-                fallback_fragments == reference_yaml.safe_load(fragment_yaml),
-            )
-
-        block_yaml = (
-            "literal: |\n"
-            "  first # literal\n"
-            "\n"
-            "  # literal content\n"
-            "    nested\n"
-            "folded: >\n"
-            "  first # folded\n"
-            "\n"
-            "  # folded content\n"
-            "  second\n"
-        )
-        fallback_blocks = _yaml_subset.safe_load(block_yaml)
-        check(
-            "fallback preserves literal/folded hashes, blanks, and indent",
-            fallback_blocks
-            == {
-                "literal": "first # literal\n\n# literal content\n  nested\n",
-                "folded": "first # folded\n# folded content second\n",
-            },
-        )
-        if reference_yaml is not None:
-            check(
-                "fallback matches PyYAML block scalar profile",
-                fallback_blocks == reference_yaml.safe_load(block_yaml),
-            )
-        check(
-            "fallback preserves single-quoted backslash and empty scalar",
-            _yaml_subset.safe_load("empty: ''\nvalue: 'a\\b # stays'\n")
-            == {"empty": "", "value": "a\\b # stays"},
-        )
-        unclosed_double = False
-        try:
-            _yaml_subset.safe_load('value: "unterminated\n')
-        except _yaml_subset.YAMLSubsetError:
-            unclosed_double = True
-        check("fallback rejects unclosed double quote", unclosed_double)
-
-        bad_topic = root / "phase0-bad-single-quote"
-        _write_phase(bad_topic, 0)
-        (bad_topic / "protocol.yml").write_text(
-            (bad_topic / "protocol.yml")
-            .read_text()
-            .replace("topic: demo-topic", "topic: 'bad''slug'")
-        )
-        rc, out = run_validator(bad_topic, fallback=True)
-        check(
-            "decoded single-quoted topic is rejected by schema",
-            rc != 0 and "does not match" in out,
-            out,
-        )
-
-        mismatch = root / "phase2"
-        protocol = (
-            (mismatch / "protocol.yml").read_text().replace("deduped: 1", "deduped: 0")
-        )
-        (mismatch / "protocol.yml").write_text(protocol)
-        rc, out = run_validator(mismatch, fallback=True)
-        check("counts mismatch is nonzero", rc != 0 and "deduped" in out)
-
-        phase4 = root / "phase4"
-        coverage = (phase4 / "coverage.yml").read_text()
-        (phase4 / "coverage.yml").write_text(
-            coverage.replace(
-                "method: long-context, control: fixed recall, evaluation: 3+-hop",
-                "method: iterative, control: none, evaluation: 2-hop",
-                1,
-            )
-        )
-        rc, out = run_validator(phase4, fallback=True)
-        check(
-            "coverage duplicate/missing cell is caught",
-            rc != 0 and ("duplicate grid cell" in out or "missing" in out),
-        )
-        wrong_occupant = root / "phase4-wrong-occupant"
-        _write_phase(wrong_occupant, 4)
-        wrong_text = (
-            (wrong_occupant / "coverage.yml")
-            .read_text()
-            .replace("occupants: [alpha2025x]", "occupants: [ghost2025x]", 1)
-        )
-        (wrong_occupant / "coverage.yml").write_text(wrong_text)
-        rc, out = run_validator(wrong_occupant, fallback=True)
-        check("coverage wrong occupant is caught", rc != 0 and "not an include" in out)
-
-        abstract_only = root / "phase4-abstract-occupant"
-        _write_phase(abstract_only, 4)
-        abstract_record = json.loads((abstract_only / "corpus.jsonl").read_text())
-        abstract_record["evidence_read"] = "abstract"
-        (abstract_only / "corpus.jsonl").write_text(json.dumps(abstract_record) + "\n")
-        (abstract_only / "protocol.yml").write_text(
-            (abstract_only / "protocol.yml")
-            .read_text()
-            .replace("fulltext_kept: 1", "fulltext_kept: 0")
-        )
-        rc, out = run_validator(abstract_only, fallback=True)
-        check(
-            "abstract-only include cannot occupy coverage cell",
-            rc != 0 and "abstract-only" in out and "cannot establish coverage" in out,
-        )
-
-        duplicate_queries = root / "phase4-duplicate-query-phrasings"
-        _write_phase(duplicate_queries, 4)
-        duplicate_query_text = (
-            (duplicate_queries / "gaps.yml")
-            .read_text()
-            .replace(
-                "[one phrasing, two phrasing, three phrasing]",
-                "[Same query, same   query, SAME QUERY]",
-            )
-        )
-        (duplicate_queries / "gaps.yml").write_text(duplicate_query_text)
-        rc, out = run_validator(duplicate_queries, fallback=True)
-        check(
-            "validator rejects duplicate normalized query phrasings",
-            rc != 0 and "only 1 distinct query" in out,
-        )
-
-        legal = root / "phase4-closure"
-        _write_phase(legal, 4)
-        legal_gaps = (
-            (legal / "gaps.yml")
-            .read_text()
-            .replace(
-                "    confidence: medium",
-                "    closes_if_met:\n      key: alpha2025x\n      date: 2026-01-02\n      rationale: synthetic closure record\n    threats:\n      - key: alpha2025x\n        date: 2026-01-02\n        unmet_clause: control is not matched\n    confidence: medium",
-            )
-        )
-        (legal / "gaps.yml").write_text(legal_gaps)
-        (legal / "protocol.yml").write_text(
-            (legal / "protocol.yml").read_text() + "last_searched_at: 2026-01-02\n"
-        )
-        rc, out = run_validator(legal, fallback=True)
-        check("legal watch closure and threat references pass", rc == 0, out)
-
-        revived = root / "phase4-revivable"
-        _write_phase(revived, 4)
-        revived_text = (
-            (revived / "coverage.yml")
-            .read_text()
-            .replace(
-                "    state: unexplored\n    trend_evidence: live neighbour\n    gap_id: G1",
-                "    state: abandoned\n    trend_evidence: live neighbour\n    gap_id: G1",
-                1,
-            )
-        )
-        (revived / "coverage.yml").write_text(revived_text)
-        rc, out = run_validator(revived, fallback=True)
-        check(
-            "abandoned promoted cell without successor is rejected",
-            rc != 0 and "revivable_by" in out,
-        )
-        (revived / "coverage.yml").write_text(
-            revived_text.replace(
-                "    gap_id: G1", "    gap_id: G1\n    revivable_by: alpha2025x", 1
-            )
-        )
-        rc, out = run_validator(revived, fallback=True)
-        check("abandoned promoted cell with included successor passes", rc == 0, out)
-
-        duplicate_modes = root / "phase4-duplicate-modes"
-        _write_phase(duplicate_modes, 4)
-        record = json.loads((duplicate_modes / "corpus.jsonl").read_text())
-        record["found_via"].append("keyword:second-query")
-        (duplicate_modes / "corpus.jsonl").write_text(json.dumps(record) + "\n")
-        rc, out = run_validator(duplicate_modes, fallback=True)
-        check("recall diagnostic counts each paper-mode once", rc == 0, out)
-
-        invalid_dates = root / "invalid-dates"
-        _write_phase(invalid_dates, 4)
-        protocol_text = (
-            (invalid_dates / "protocol.yml")
-            .read_text()
-            .replace("created: 2026-01-01", "created: 2026-02-31")
-        )
-        (invalid_dates / "protocol.yml").write_text(protocol_text)
-        record = json.loads((invalid_dates / "corpus.jsonl").read_text())
-        record["accessed"] = "2026-02-31"
-        (invalid_dates / "corpus.jsonl").write_text(json.dumps(record) + "\n")
-        invalid_gaps = (
-            (invalid_dates / "gaps.yml")
-            .read_text()
-            .replace("last_checked: 2026-01-02", "last_checked: 2026-02-31")
-        )
-        (invalid_dates / "gaps.yml").write_text(invalid_gaps)
-        rc_fallback, out_fallback = run_validator(invalid_dates, fallback=True)
-        rc_dev, out_dev = run_validator(invalid_dates)
-        check(
-            "invalid calendar dates fail in fallback and development",
-            rc_fallback != 0
-            and rc_dev != 0
-            and "traceback" not in (out_fallback + out_dev).lower(),
-            out_dev,
-        )
-
-        orphan_gap = root / "phase4-orphan-gap"
-        _write_phase(orphan_gap, 4)
-        (orphan_gap / "coverage.yml").write_text(
-            (orphan_gap / "coverage.yml").read_text().replace("    gap_id: G1\n", "", 1)
-        )
-        rc, out = run_validator(orphan_gap, fallback=True)
-        check(
-            "orphan gap is rejected",
-            rc != 0 and "no legal empty promotable cell" in out,
-        )
-
-        occupied_gap = root / "phase4-occupied-gap"
-        _write_phase(occupied_gap, 4)
-        occupied_text = (
-            (occupied_gap / "coverage.yml")
-            .read_text()
-            .replace(
-                "    state: unexplored\n    trend_evidence: live neighbour\n    gap_id: G1",
-                "    occupants: [alpha2025x]\n    state: occupied\n    gap_id: G1",
-                1,
-            )
-        )
-        (occupied_gap / "coverage.yml").write_text(occupied_text)
-        rc, out = run_validator(occupied_gap, fallback=True)
-        check(
-            "occupied gap_id cell is rejected",
-            rc != 0 and "gap_id" in out and "promotable" in out,
-        )
-
-        multi_gap = root / "phase4-multi-gap-cell"
-        _write_phase(multi_gap, 4)
-        multi_text = (
-            (multi_gap / "coverage.yml")
-            .read_text()
-            .replace(
-                "    state: undecided",
-                "    state: unexplored\n    trend_evidence: second legal cell\n    gap_id: G1",
-                1,
-            )
-        )
-        (multi_gap / "coverage.yml").write_text(multi_text)
-        rc, out = run_validator(multi_gap, fallback=True)
-        check("one gap may reference multiple legal cells", rc == 0, out)
-
-        low_include = root / "phase2-low-include"
-        _write_phase(low_include, 2)
-        low_record = json.loads((low_include / "corpus.jsonl").read_text())
-        low_record["relevance"] = 5
-        (low_include / "corpus.jsonl").write_text(json.dumps(low_record) + "\n")
-        (low_include / "protocol.yml").write_text(
-            (low_include / "protocol.yml")
-            .read_text()
-            .replace("scored_at_or_above_threshold: 1", "scored_at_or_above_threshold: 0")
-        )
-        rc, out = run_validator(low_include, fallback=True)
-        check(
-            "low relevance include is rejected",
-            rc != 0 and "screen=include relevance" in out,
-        )
-
-        high_exclude = root / "phase2-high-exclude"
-        _write_phase(high_exclude, 2)
-        high_record = json.loads((high_exclude / "corpus.jsonl").read_text())
-        high_record.update(
-            {"relevance": 10, "screen": "exclude", "exclude_reason": "out of scope"}
-        )
-        (high_exclude / "corpus.jsonl").write_text(json.dumps(high_record) + "\n")
-        rc, out = run_validator(high_exclude, fallback=True)
-        check("high relevance exclude remains allowed", rc == 0, out)
-
-        future_dates = root / "phase5-future-dates"
-        _write_phase(future_dates, 5)
-        (future_dates / "protocol.yml").write_text(
-            (future_dates / "protocol.yml")
-            .read_text()
-            .replace("created: 2026-01-01", "created: 2099-01-01")
-            .replace("last_searched_at: 2026-01-02", "last_searched_at: 2099-01-02")
-        )
-        future_record = json.loads((future_dates / "corpus.jsonl").read_text())
-        future_record["accessed"] = "2099-01-02"
-        (future_dates / "corpus.jsonl").write_text(json.dumps(future_record) + "\n")
-        future_gap = (
-            (future_dates / "gaps.yml")
-            .read_text()
-            .replace("last_checked: 2026-01-02", "last_checked: 2099-01-03")
-        )
-        (future_dates / "gaps.yml").write_text(future_gap)
-        rc, out = run_validator(future_dates, fallback=True)
-        check(
-            "future and out-of-order protocol/corpus/gap dates fail",
-            rc != 0
-            and "cannot be in the future" in out
-            and "accessed cannot be in the future" in out,
-        )
-
-        watch_order = root / "phase5-watch-date-order"
-        _write_phase(watch_order, 5)
-        watch_gap = (
-            (watch_order / "gaps.yml")
-            .read_text()
-            .replace(
-                "    confidence: medium",
-                "    closes_if_met:\n      key: alpha2025x\n      date: 2026-01-02\n      rationale: closure\n    threats:\n      - key: alpha2025x\n        date: 2026-01-02\n        unmet_clause: still open\n    confidence: medium",
-            )
-        )
-        (watch_order / "gaps.yml").write_text(watch_gap)
-        (watch_order / "protocol.yml").write_text(
-            (watch_order / "protocol.yml")
-            .read_text()
-            .replace("last_searched_at: 2026-01-02", "last_searched_at: 2026-01-01")
-        )
-        rc, out = run_validator(watch_order, fallback=True)
-        check(
-            "watch closure/threat dates cannot outrun last search",
-            rc != 0 and "after protocol.last_searched_at" in out,
-        )
-
-        duplicate_refs = root / "phase3-duplicate-refs"
-        _write_phase(duplicate_refs, 3)
-        (duplicate_refs / "refs.bib").write_text(
-            "% rs-provenance: key=alpha2025x id=arXiv:2500.00001 tool=t date=2026-01-02\n"
-            "@article{alpha2025x, title={A}}\n@article{alpha2025x, title={B}}\n"
-        )
-        rc, out = run_validator(duplicate_refs, fallback=True)
-        check(
-            "validator rejects duplicate BibTeX key with one attestation",
-            rc != 0 and "duplicate citation key" in out,
-        )
-
-        parenthesized_refs = root / "phase3-parenthesized-refs"
-        _write_phase(parenthesized_refs, 3)
-        (parenthesized_refs / "refs.bib").write_text(
-            "@article(alpha2025x, title={Unattested})\n"
-        )
-        rc, out = run_validator(parenthesized_refs, fallback=True)
-        check(
-            "validator recognizes parenthesized BibTeX entries",
-            rc != 0 and "lacks a strict per-entry" in out,
-        )
-
-        directives_refs = root / "phase3-directives-refs"
-        _write_phase(directives_refs, 3)
-        (directives_refs / "refs.bib").write_text(
-            "@STRING{venue = {Example}}\n"
-            '@PREAMBLE("generated")\n'
-            "@COMMENT{directive is not a citation}\n"
-            "% rs-provenance: key=alpha2025x id=arXiv:2500.00001 tool=t date=2026-01-02\n"
-            "@ARTICLE(alpha2025x, title={A paper})\n"
-        )
-        rc, out = run_validator(directives_refs, fallback=True)
-        check(
-            "validator ignores BibTeX directives case-insensitively",
-            rc == 0,
-            out,
-        )
-
-        from ai_research_skills.assets.scripts import _schema_subset, _yaml_subset
-
-        try:
-            _schema_subset.iter_errors({}, {"type": "object", "unknown_keyword": True})
-            unknown_schema = False
-        except _schema_subset.SchemaSubsetError:
-            unknown_schema = True
-        check("schema fallback rejects unknown keywords", unknown_schema)
-        map_text = (
-            ASSETS / "skills" / "ars-survey" / "references" / "04-map.md"
-        ).read_text()
-        yaml_block = map_text.split("```yaml\n", 3)[3].split("```", 1)[0]
-        fallback_map = _yaml_subset.safe_load(yaml_block)
-        check(
-            "fallback parses documented multiline flow YAML",
-            isinstance(fallback_map, dict)
-            and fallback_map.get("gaps", [{}])[0]
-            .get("evidence_of_absence", {})
-            .get("nearest_prior_work"),
-        )
-        try:
-            import yaml as dev_yaml
-        except ImportError:
-            dev_yaml = None
-        if dev_yaml is not None:
-            dev_map = dev_yaml.safe_load(yaml_block)
-            check(
-                "fallback and PyYAML agree on documented map shape",
-                fallback_map["gaps"][0]["statement"] == dev_map["gaps"][0]["statement"]
-                and len(fallback_map["gaps"][0]["evidence_of_absence"]["queries_run"])
-                == len(dev_map["gaps"][0]["evidence_of_absence"]["queries_run"]),
-            )
-        colon_scalar = (
-            "citation_chains:\n  - W123:cites:1\n  - https://example.test/work:detail\n"
-        )
-        fallback_colons = _yaml_subset.safe_load(colon_scalar)
-        check(
-            "fallback keeps colon-bearing block-list scalars as strings",
-            fallback_colons
-            == {"citation_chains": ["W123:cites:1", "https://example.test/work:detail"]},
-        )
-        if dev_yaml is not None:
-            check(
-                "fallback and PyYAML agree on colon-bearing scalars",
-                fallback_colons == dev_yaml.safe_load(colon_scalar),
-            )
-        bad = legal_gaps.replace(
-            "closes_if_met:\n      key: alpha2025x",
-            "closes_if_met:\n      key: ghost2025x",
-            1,
-        )
-        (legal / "gaps.yml").write_text(bad)
-        rc, out = run_validator(legal, fallback=True)
-        check("invalid closure reference is caught", rc != 0 and "closes_if_met.key" in out)
-
+    fixture = "truth_yes: yes\ntruth_no: NO\ntruth_on: On\ntruth_off: off\nletter_y: y\nletter_n: n\n"
+    fallback_value = fallback_yaml(fixture)
+    try:
+        import yaml as dev_yaml
+    except ImportError:
+        dev_yaml = None
     check(
-        "worked example has a complete 12-cell grid",
-        EXAMPLE.joinpath("coverage.yml").read_text().count("  - coords:") == 12,
+        "hardening fallback YAML 1.1 booleans match PyYAML",
+        dev_yaml is None or fallback_value == dev_yaml.safe_load(fixture),
     )
-    rc_dev, out_dev = run_validator(EXAMPLE)
-    rc, out = run_validator(EXAMPLE, fallback=True)
-    check("worked example is clean", rc == 0 and "0 error(s)" in out, out)
-    check("development and fallback validators agree", rc_dev == rc == 0, out_dev)
-    rc_broken_dev, _out = run_validator(BROKEN)
-    rc_broken_fallback, _out = run_validator(BROKEN, fallback=True)
+
+
+def test_legacy_workspace_and_bare_runtime() -> None:
+    print("\nlegacy workspace and bare runtime")
+    protocol = (EXAMPLE / "protocol.yml").read_text()
+    check("legacy phase field remains in example", "phase:" in protocol)
+    check("legacy corpus remains readable", (EXAMPLE / "corpus.jsonl").is_file())
+    check("legacy coverage remains readable", (EXAMPLE / "coverage.yml").is_file())
+    bare = subprocess.run(
+        [sys.executable, "-I", "-S", str(VALIDATE), "--self-test"],
+        text=True,
+        capture_output=True,
+        env={"ARS_FORCE_FALLBACK": "1", "PATH": os.environ.get("PATH", "")},
+    )
     check(
-        "development and fallback reject broken state",
-        rc_broken_dev != 0 and rc_broken_fallback != 0,
+        "bare interpreter linter self-test passes",
+        bare.returncode == 0,
+        bare.stdout + bare.stderr,
     )
-    rc, _out = run_validator(BROKEN, fallback=True)
-    check("broken fixture is nonzero under fallback", rc != 0)
-    rc, _out = run_validator(EXAMPLE, isolated=True)
-    check("clean isolated interpreter validates worked example", rc == 0)
-    rc, _out = run_validator(BROKEN, isolated=True)
-    check("clean isolated interpreter rejects broken example", rc != 0)
 
 
 def main() -> int:
-    print(f"ai-research-skills tests (python {sys.version.split()[0]})")
-    test_payload_and_hooks()
-    test_installer()
-    test_hardening_regressions()
-    test_doctor()
-    test_validator()
+    test_version_and_assets()
+    test_linter_scope()
+    test_optional_evidence_and_host_selection()
+    test_install_and_legacy_cleanup()
+    test_migration_safety_regressions()
+    test_installer_hardening_regressions()
+    test_legacy_workspace_and_bare_runtime()
     print(f"\n{passed} passed, {len(failed)} failed")
-    for name in failed:
-        print(f"  - {name}")
-    return 1 if failed else 0
+    if failed:
+        print("Failed checks:")
+        for name in failed:
+            print(f"- {name}")
+        return 1
+    return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(main())

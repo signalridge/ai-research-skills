@@ -1,160 +1,135 @@
 # ai-research-skills
 
-A survey-first research suite for AI/ML. **One survey engine, four exits.**
-
-A go/no-go on a topic, a related-work section, a standing watch, and a build/adopt/skip
-brief look like four workflows. They are four projections of one object — a screened,
-provenance-tracked, taxonomized corpus with a coverage map over it.
-
-So the survey is built once and written to disk as typed state. Everything downstream is a
-pure function of it, and **only the survey is allowed to search**.
-
-```
-                        ┌─────────────────────────────┐
-   topic ──────────────▶│  ars-survey (only searcher) │
-                        └──────────────┬──────────────┘
-                                       │ .research/survey/<slug>/
-             ┌───────────────┬─────────┴────┬──────────────┐
-             ▼               ▼              ▼              ▼
-        ars-gap-gate  ars-related-work  ars-watch  ars-decision-brief
-         go/no-go        prose+bib        diffs     evidence matrix
-```
+A small, user-invoked research toolbox for AI/ML. Each skill is a standalone peer: use only
+what the current question needs, with a prompt, files, links, supplied sources, or an optional
+`.research/survey/<slug>/` workspace.
 
 ## Install
 
-Into any project you want to run a survey in:
+For a persistent CLI, install the tool once and then install into a project:
+
+```bash
+uv tool install --from git+https://github.com/signalridge/ai-research-skills ai-research-skills
+ai-research-skills install .
+```
+
+For a one-shot install without adding a persistent command:
 
 ```bash
 uvx --from git+https://github.com/signalridge/ai-research-skills ai-research-skills install .
 ```
 
-It installs into whichever agents the project already uses — **claude, codex, cursor,
-pi, kimi** — or Claude Code if it uses none. Scope it with `--host claude,codex`. `uninstall` removes only manifest-owned files and handlers, leaves foreign hooks alone, and refuses modified ownership state; `doctor` checks each host item by item.
+The installer detects existing `claude`, `codex`, `cursor`, `pi`, and `kimi` directories, or
+falls back to Claude Code. Use `--host claude,codex` to choose explicitly.
 
-**Write-time guardrails are configured on four hosts; runtime trust differs.** A host earns
-a place here by having a documented enforcement surface, not just a skills directory.
-Cursor has no end-of-turn safety equivalent, and Pi cannot be declared active until its
-extension is confirmed; the installer and doctor say configured/degraded rather than
-claiming runtime activity. Kimi remains skills-only.
-
-| Host | Config written for you | Slash commands | Note |
-|---|---|---|---|
-| claude | `.claude/settings.json` | yes | |
-| codex | `.codex/hooks.json` | — | top-level `hooks` object; foreign groups preserved |
-| cursor | `.cursor/hooks.json` | — | camelCase events; native direct entries; stop advisory omitted |
-| pi | `.pi/settings.json` | — | inert until `pi install npm:@hsingjui/pi-hooks` |
-| kimi | — | — | skills only; no verified hook contract |
-
-The guards emit both deny dialects — `hookSpecificOutput` for Claude/Codex, a flat
-`permission` field for Cursor — so one implementation covers the configured write-time
-surfaces. Kimi gets the methodology without the enforcement, and the installer says so.
-Cursor has no safe stop/end-of-turn equivalent, so its `stop_survey_peer` advisory is not
-installed and the degraded capability is reported. Pi is reported as configured-but-inactive
-unless its extension runtime is independently confirmed.
-
-Two things only Claude Code gives you. **Slash commands** are a Claude-only surface;
-elsewhere the same skills trigger from their descriptions or by name ("run `ars-survey` on
-X"), and the installer reports that per host rather than announcing commands it did not
-write. **`disallowed-tools`**, which makes the four read-only exits structurally unable to
-search, is a Claude Code frontmatter extension rather than part of the Agent Skills
-standard — and even there it lapses on your next message. So the "never search here" rule
-stays written into every one of those skills as the real backstop.
-
-Claude's hook uses `$CLAUDE_PROJECT_DIR`; non-Claude installs use an absolute project path so
-the command remains anchored when the agent runs from a subdirectory. Payload-relative paths
-still depend on the host's event contract, which is why the installer reports degraded
-capabilities instead of promising identical runtime behavior.
-
-Search backends are configured separately — see **[docs/SETUP.md](docs/SETUP.md)**. The
-`arxiv` MCP server is required; `openalex` and `tavily` are strongly recommended.
-
-## Use
-
-```
-/ars-survey <topic>      start or resume a survey — the only stage that searches
-/ars-gate                3-gate go/no-go dossier, verdict withheld
-/ars-relwork             related-work draft + verified bib
-/ars-brief <decision>    build/adopt/skip evidence matrix
-/ars-watch [arm|check]   arm the subscription, or run a digest
-/ars-audit               red-team + citation/number integrity
-/ars-help                where you are in a survey right now
-```
-
-Skills auto-trigger too — "survey retrieval-augmented agents", "has anyone compared X to Y".
-
-## What it enforces
-
-### Honest permissions and ownership
-
-`ars-survey` is the only skill that may freely construct or discover the corpus. `ars-watch`
-may update `corpus.jsonl`, `protocol.yml`, and `gaps.yml` only at Phase 5 while replaying the
-frozen protocol. `ars-red-team` may search only for refutation and never appends discoveries
-to the corpus. `ars-gap-gate`, `ars-related-work`, and `ars-decision-brief` are read-only
-projections of survey state; `ars-verify` performs identifier lookup, not discovery. Missing
-evidence goes back to `ars-survey`.
-
-The installer writes `.ai-research-skills/manifest.json`, sealed with SHA256, and owns only
-listed ordinary files plus exact hook handlers. Same-name conflicts, symlinks, invalid JSON,
-and modified manifests are rejected before any mutation. Unknown or edited pre-v0.5 `rs-*`
-assets are preserved with a migration notice.
-
-Prompts are advisory; configured hooks are enforcement where the host runtime dispatches
-them. Pi remains unconfirmed and Cursor is missing end-of-turn advisory coverage. All
-shipped guards fail open.
-
-| Hook | Verdict | Catches |
-|---|---|---|
-| `bib_provenance_guard` | **denies** | A `.bib` gaining or changing entries without a per-entry `rs-provenance` attestation binding key, stable id, tool and date. A legacy file header only grandfathers unchanged old entries. |
-| `absence_claim_guard` | Claude PostToolUse block; Cursor/Codex pre-write deny | "No prior work…", "first to…" in prose, with no `gaps.yml` entry carrying ≥3 query phrasings behind it. |
-| `survey_staleness` | advisory | Session start: a corpus older than 30 days being reasoned from. |
-| `stop_survey_peer` | advisory | End of turn: abstract-only includes, unadjudicated tails, single-mode recall, gaps with no nearest prior work, zero corroboration. |
-
-The BibTeX attestation is a tamper-evident tripwire, not cryptographic proof: attestations
-can be forged. `ars-verify` must still resolve identifiers externally. The absence guard is project-scoped, not matched to the sentence you wrote — no regex can
-tell which gap a claim rests on, so it names the gap to check rather than pretending to
-have found it. `stop_survey_peer` is a deterministic read of state, not a second model: it
-tells you what the corpus rests on, not what you concluded from it. That is `ars-red-team`.
-
-Survey state lives in `.research/survey/<slug>/` and is schema-checked:
+Installs contain skills, Claude command aliases, the optional structural linter, and schemas.
+Fresh installs install **no runtime hooks** and do not create or modify host hook settings.
+The ownership manifest and transaction journal protect package files without claiming foreign
+files or configuration.
 
 ```bash
-uv run --group dev python .claude/ai-research-skills/scripts/rs_validate.py .research/survey/<slug>
+ai-research-skills install .
+ai-research-skills doctor .
+ai-research-skills lint .research/survey/my-topic
+ai-research-skills uninstall .
 ```
 
-`phase` is required and validation is phase-aware: low phases are not penalised for future
-artifacts, while later phases reconcile explicit counts, typed closures, the complete unique
-Cartesian grid and saturation freshness.
+These commands use the persistent `uv tool install` route above. With the one-shot route,
+run the same subcommand through `uvx --from git+https://github.com/signalridge/ai-research-skills ai-research-skills ...`.
 
-## Docs
+`doctor` is structural and user-invoked. During an upgrade or doctor run it can remove exact,
+unchanged ARS-owned legacy hook handlers and obsolete hook files from older installations.
+Modified handlers/files and unknown configuration are preserved and reported. It never runs
+the research linter automatically.
 
-- **[docs/DESIGN.md](docs/DESIGN.md)** — the architecture, the seventeen rules and the
-  failure each one traces to, and what is deliberately not built.
-- **[docs/SETUP.md](docs/SETUP.md)** — backend configuration, OpenAlex budget, and API
-  failure modes verified against the live service.
-- **[examples/](examples/README.md)** — a complete survey state directory at the moment it
-  freezes, annotated with what each record demonstrates.
+## Use the toolbox
+
+| Skill | Use it for |
+|---|---|
+| `ars-survey` | any chosen combination of discovery, screening, extraction, comparison, and synthesis |
+| `ars-gap-gate` | an advisory assessment of whether a gap is open, useful, and feasible |
+| `ars-related-work` | a thematic, source-grounded related-work section |
+| `ars-decision-brief` | build/adopt/skip/revisit evidence for a technical choice |
+| `ars-watch` | a deliberate literature update or alert check |
+| `ars-red-team` | counterevidence and unsupported-claim review |
+| `ars-verify` | citation, provenance, and number traceability |
+
+Claude users also get `/ars-survey`, `/ars-gate`, `/ars-relwork`, `/ars-brief`, `/ars-watch`,
+`/ars-audit` (legacy-compatible red-team alias), `/ars-verify`, `/ars-help`, and `/ars-lint`.
+Aliases are explicit and do not chain skills. Other hosts use the installed skills by name.
+Nothing runs at install, session start, turn end, or an imagined phase transition.
+The skills and command aliases declare user-only invocation where the host supports that field. A host that does not expose a standard auto-invocation switch cannot enforce this distinction; invoke the named skill or command explicitly. No hook is used to simulate one.
+
+A workspace is optional. Existing `.research/survey/<slug>/` corpora remain useful, including
+legacy `phase` fields and artifacts. Skills read and write named files only when the user asks;
+missing files yield an explicit limitation or follow-up suggestion, not a workflow error.
+
+A corpus record may add an optional `claim_locator` or `numbers[].locator` with a non-empty
+`kind` and `value` (for example `table`, `page`, `section`, or `url_fragment`); legacy records
+and number fields remain valid. A protocol may likewise add an optional `search` status with
+`not_attempted`, `success` (completed with hits), `success_no_hits`, `partial_success`,
+`backend_failure`, or `unknown`, plus backend/query/note context. These fields describe what was recorded, not
+completion or readiness.
+
+Example recipes:
+
+```text
+Search two query families for X, screen the supplied results, extract only claims used in a
+short comparison, and save the source ledger under .research/survey/x/.
+```
+
+```text
+Use the existing corpus and these PDFs to draft related work. Do not search, and list what the
+abstract-only records cannot support.
+```
+
+With usable evidence, reports separate sourced facts from synthesis; with partial evidence,
+they narrow claims and state the limit. With zero usable evidence, they do not invent citations,
+numbers, or a deterministic sourced report: they state attempts, constraints, and the smallest
+next step. Abstract-only records support only softened high-level wording. The complete
+`examples/worked-survey/` directory is a compatibility sample, not a required template.
+
+## Optional integrity tooling
+
+Run the linter explicitly when useful:
+
+```bash
+python3 .claude/ai-research-skills/scripts/rs_validate.py .research/survey/<slug>
+# persistent CLI (after `uv tool install` above)
+ai-research-skills lint .research/survey/<slug>
+# one-shot CLI
+uvx --from git+https://github.com/signalridge/ai-research-skills ai-research-skills lint .research/survey/<slug>
+```
+
+It checks present artifacts for parsing/schema shape, duplicate keys or identifiers, malformed
+dates, dangling references, and explicit provenance. Missing artifacts are allowed. It does
+not impose phases, recall modes, counts, grids, saturation, or extraction quotas.
+
+Keep the human-visible integrity habits short:
+
+1. fail loudly instead of silently falling back or using placeholders;
+2. run one real small case before an expensive run;
+3. snapshot and confirm before destructive changes; and
+4. do one handoff check only when requested.
+
+For literature, do not fabricate citations or numbers. Provenance and careful absence wording
+are guidelines, not hidden workflow gates. For LaTeX, compile, read the log, and fix errors.
 
 ## Develop
 
-The suite is package data. Skills, commands, hooks, schemas and the validator all live
-under **`src/ai_research_skills/assets/`** — one tree, the same one a checkout reads and a wheel
-carries. `.claude/` in this repo is not source: it is what `ai-research-skills install .`
-writes when the repo dogfoods its own guardrails, and it is gitignored. Edit under
-`assets/`, then re-run the install to see the change take effect here.
-
 ```bash
-uv sync                                   # dev toolchain (pinned by uv.lock) + dogfood install
-just test                                 # or: uv run --group dev python tests/run_tests.py
-just check                                # ruff + basedpyright + plugin-shape tests
-just install                              # re-install into this checkout after editing assets/
+uv sync
+just test
+just check
+just test-bare
 ```
 
-Tests also run on a bare interpreter with no packages installed, because the hooks must
-work in whatever `python3` the user already has:
+The assets live under `src/ai_research_skills/assets/`; `.claude/` is install output and is
+ignored. Tests also run with a bare interpreter because the optional linter must work without
+third-party packages.
 
-```bash
-uv run --no-project python tests/run_tests.py
-```
+See [docs/DESIGN.md](docs/DESIGN.md), [docs/SETUP.md](docs/SETUP.md), and
+[examples/README.md](examples/README.md).
 
 ## License
 

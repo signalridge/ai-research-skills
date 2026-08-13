@@ -4,12 +4,12 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ai-research-skills"
-version = "0.6.0"
-description = "A survey-first research suite for AI/ML — one survey engine, four exits"
+version = "0.8.0"
+description = "A user-invoked, skills-driven research toolbox for AI/ML"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
-dependencies = []   # stdlib only — the hooks run in whatever python3 the user has
+dependencies = []   # stdlib only — the installer and optional linter need no packages
 
 [project.urls]
 Repository = "https://github.com/signalridge/ai-research-skills"
@@ -32,8 +32,8 @@ dev = [
 ]
 
 [tool.basedpyright]
-# Every Python file in the repo. src/ covers the package and, under ai_research_skills/assets/,
-# the four hooks and the validator that ship with it.
+# Every Python file in the repo. src/ covers the package and the legacy recognizers,
+# optional linter, and installer support that ship with it.
 include = [
     "src",
     "tests",
@@ -48,7 +48,7 @@ exclude = [
 typeCheckingMode = "standard"
 pythonVersion = "3.10"   # same floor as ruff's target-version and requires-python
 venvPath = "."
-# The guards import their sibling _payload module by directory, the way Claude Code
-# and Codex run them (script dir on sys.path[0]). Tell the checker the same thing.
+# Legacy hook files import sibling modules by directory; keep the source tree available to
+# the checker even though fresh installs do not configure those files.
 extraPaths = ["src", "src/ai_research_skills/assets/hooks", "src/ai_research_skills/assets/scripts"]
 venv = ".venv"           # resolves pyyaml/jsonschema from the dev group for import checks
