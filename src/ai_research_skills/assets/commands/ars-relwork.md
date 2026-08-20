@@ -1,4 +1,6 @@
 ---
+description: Draft a source-grounded related-work section
+argument-hint: [topic or source list]
 disable-model-invocation: true
 ---
 # /ars-relwork

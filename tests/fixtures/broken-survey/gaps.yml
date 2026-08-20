@@ -10,6 +10,8 @@ gaps:
       nearest_prior_work:
         - key: alpha2025broken
           why_not_it: "uses a different dataset"
-      last_checked: 2026-07-01
+        - key: ghost2024missing
+          why_not_it: "names a record that is not in the corpus"
+      last_checked: 2020-07-01
     confidence: high
     closes_if: "Any paper matching retrieval recall across both arms."

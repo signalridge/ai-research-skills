@@ -1,2 +1,5 @@
-{"key":"alpha2025broken","title":"No Claim Recorded","found_via":["keyword:r1"],"relevance":9,"screen":"include","evidence_read":"abstract","contextual_summary":"x","axes":{"method":"iterative","control":"token budget"},"accessed":"2026-07-01"}
-{"key":"beta2025noreason","title":"Excluded Without Reason","found_via":["keyword:r1"],"relevance":3,"screen":"exclude","accessed":"2026-07-01"}
+{"key":"alpha2025broken","title":"No Claim Recorded","id":"openalex:W1000000001","found_via":["keyword:r1"],"relevance":9,"screen":"include","evidence_read":"abstract","contextual_summary":"x","axes":{"method":"iterative","control":"token budget"},"accessed":"2020-07-01"}
+{"key":"beta2025noreason","title":"Excluded Without Reason","found_via":["keyword:r1"],"relevance":3,"screen":"exclude","accessed":"2020-07-01"}
+{"key":"beta2025noreason","title":"Same Key As The Record Above","found_via":["keyword:r2"],"accessed":"2020-07-01"}
+{"key":"gamma2025merged","title":"Same Identifier Under A Different Field","openalex_id":"openalex:W1000000001","found_via":["citation_chain:W1000000001:cites"],"accessed":"2020-07-01"}
+{"key":"delta2025malformed","title":"Relevance Is Not An Integer","found_via":["keyword:r1"],"relevance":"high","screen":"maybe","corroboration":{"agrees_with":["ghost2024missing"]},"accessed":"2020-07-01"}

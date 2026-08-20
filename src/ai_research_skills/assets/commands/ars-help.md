@@ -1,4 +1,5 @@
 ---
+description: List the ARS research skills and when to use each
 disable-model-invocation: true
 ---
 # /ars-help

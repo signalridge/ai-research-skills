@@ -68,7 +68,9 @@ Use the stable corpus `key` for identity. A report may use temporary `[1]`/`[2]`
 assigning one number per key and reusing it, without adding those numbers to `corpus.jsonl`.
 Full or partial evidence should be labelled as such; with no usable evidence, report attempts,
 limits, and the smallest next step instead of fabricating citations, numbers, or a sourced
-conclusion. Abstract-only evidence calls for softened wording. The worked example is a
+conclusion. Abstract-only evidence supports only an attributed, softened high-level direction or
+conclusion; it does not support numeric results such as 4 points or 20% unless a named page,
+table, figure, log, or section has been read and recorded. The worked example is a
 compatibility sample, not a template to complete.
 
 ## Four small integrity checks

@@ -1,4 +1,6 @@
 ---
+description: Assess whether a research gap is open, useful, and feasible
+argument-hint: [gap or topic]
 disable-model-invocation: true
 ---
 # /ars-gate

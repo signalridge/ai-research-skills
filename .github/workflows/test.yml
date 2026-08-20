@@ -31,6 +31,10 @@ jobs:
         run: |
           uv run --group dev python src/ai_research_skills/assets/scripts/rs_validate.py \
             examples/worked-survey/.research/survey/retrieval-augmented-agents
+      # A backstop only.  "Does it fail?" is satisfied by a single error, so it stayed
+      # green while four of the fixture's five advertised defect classes went undetected.
+      # test_broken_fixture_reports_every_claimed_defect asserts each class by name; this
+      # step just guarantees the non-zero exit an operator would look for.
       - name: validator rejects the broken fixture
         run: |
           if uv run --group dev python src/ai_research_skills/assets/scripts/rs_validate.py tests/fixtures/broken-survey
@@ -60,24 +64,10 @@ jobs:
           for b in bad: print(f"::error::{b}")
           sys.exit(1 if bad else 0)
           PY
-      - name: skill frontmatter
-        run: |
-          uv run --group dev python - <<'PY'
-          import pathlib, re, sys, yaml
-          bad = []
-          for p in sorted(pathlib.Path("src/ai_research_skills/assets/skills").glob("*/SKILL.md")):
-              m = re.match(r"^---\n(.*?)\n---", p.read_text(), re.S)
-              if not m:
-                  bad.append(f"{p}: no frontmatter"); continue
-              fm = yaml.safe_load(m.group(1))
-              if not fm.get("name"): bad.append(f"{p}: no name")
-              if not fm.get("description"): bad.append(f"{p}: no description")
-              # description + when_to_use is truncated at 1536 chars in the skill listing
-              n = len(" ".join(str(fm.get("description", "")).split()))
-              if n > 1536: bad.append(f"{p}: description {n} chars, over the 1536 cap")
-          for b in bad: print(f"::error::{b}")
-          sys.exit(1 if bad else 0)
-          PY
+      # Shared with `just skills` and tests/run_tests.py so the rules exist once, and run
+      # with --no-project because the checker must work on a bare interpreter.
+      - name: skill and command frontmatter
+        run: uv run --no-project python tests/check_frontmatter.py
       - name: ruff
         run: |
           uv run --group dev ruff check src/ tests/ install.py

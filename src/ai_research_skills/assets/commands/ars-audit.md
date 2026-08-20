@@ -1,4 +1,6 @@
 ---
+description: Adversarially review a draft, corpus, or brief
+argument-hint: [draft, claim, or path]
 disable-model-invocation: true
 ---
 # /ars-audit

@@ -1,4 +1,6 @@
 ---
+description: Trace citations, numbers, and provenance back to sources
+argument-hint: [draft or workspace path]
 disable-model-invocation: true
 ---
 # /ars-verify

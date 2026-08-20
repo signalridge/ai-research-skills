@@ -21,8 +21,9 @@ a required template or a completion target. The optional `search` status and loc
 be added independently; their absence does not mean that a search had no results. Reports keep
 stable corpus keys and may use temporary display numbers without writing those numbers back to
 records. Full, partial, and zero-evidence outputs should say what was actually checked; zero
-evidence is not a reason to invent citations or numbers, and abstract-only records require
-softened wording.
+evidence is not a reason to invent citations or numbers. Abstract-only records support only
+an attributed, softened high-level direction or conclusion, not numeric results such as 4 points
+or 20% unless a named page, table, figure, log, or section has been read and recorded.
 
 ## What to explore
 

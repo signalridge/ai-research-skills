@@ -1,4 +1,6 @@
 ---
+description: Lint a .research workspace for structural integrity
+argument-hint: [path to .research/survey directory]
 disable-model-invocation: true
 ---
 # /ars-lint

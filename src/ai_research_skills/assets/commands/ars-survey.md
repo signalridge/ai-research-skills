@@ -1,4 +1,6 @@
 ---
+description: Survey literature — discover, screen, extract, synthesise
+argument-hint: [topic or question]
 disable-model-invocation: true
 ---
 # /ars-survey

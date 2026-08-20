@@ -1,9 +1,14 @@
 """Legacy hook recognizers and cleanup helpers.
 
-ARS 0.8 does not generate, install, or validate runtime governance hooks.  This module is
-kept for one compatibility period so an upgrade or explicit doctor run can remove an
-exact, unchanged ARS handler from an older install.  It deliberately has no desired
-handler builder: fresh installs never touch host hook configuration.
+ARS 0.8 does not generate, install, or validate runtime governance hooks.  This module
+exists only so an upgrade or explicit doctor run can remove an exact, unchanged ARS handler
+from a pre-0.8 install.  It deliberately has no desired handler builder: fresh installs
+never touch host hook configuration.
+
+REMOVED IN 0.9.0, together with ``assets/hooks/``, ``assets/legacy/v0.5.0.json``, the
+legacy branches in ``doctor``, and manifest format 1.  See docs/DESIGN.md §4.  An install
+that predates 0.8 must be upgraded through an 0.8.x release, which performs the cleanup,
+before 0.9.0 removes the ability to recognise it.
 """
 
 from __future__ import annotations
@@ -60,17 +65,6 @@ def legacy_handlers_required(host: Any) -> bool:
 def legacy_config_supported(host: Any) -> bool:
     """Whether exact legacy hook configuration may be inspected for this host."""
     return legacy_handlers_required(host)
-
-
-def _legacy_grouped_ownership_provened(
-    settings: dict[str, Any],
-    host: Any,
-    root: str | None,
-    owned_records: Iterable[dict[str, Any]] | None,
-    allow_legacy: bool,
-) -> bool:
-    """Return whether grouped Cursor migration has complete ownership evidence."""
-    return host.id == "cursor" and allow_legacy
 
 
 def legacy_write_matcher_matches(host: Any, matcher: object) -> bool:
@@ -138,6 +132,7 @@ ADAPTERS: dict[str, HookAdapter] = {
     ),
     "pi": HookAdapter("pi"),
     "kimi": HookAdapter("kimi"),
+    "kimi-code": HookAdapter("kimi-code"),
 }
 
 
@@ -482,90 +477,6 @@ def _remove_from_group(group: dict[str, Any], keep: list[Any]) -> dict[str, Any]
     return None
 
 
-def _migrate_cursor_grouped(settings: dict[str, Any], host: Any, root: str | None) -> None:
-    """Convert proven v0.5 Cursor groups to native direct entries."""
-    container = _container(settings, host)
-    if not isinstance(container, dict):
-        return
-    adapter = for_host(host)
-    preserved_metadata: list[dict[str, Any]] = []
-
-    def historical_script(
-        event: str, handler: dict[str, Any], wrapper: dict[str, Any]
-    ) -> str | None:
-        command = handler.get("command")
-        for script in HOOK_SCRIPTS:
-            if command not in historical_command_forms(host, script):
-                continue
-            if _legacy_exact_shape(event, handler, wrapper, host, script):
-                return script
-        return None
-
-    def convert(event: str, entries: object) -> list[Any]:
-        if not isinstance(entries, list):
-            return []
-        converted: list[Any] = []
-        for raw in entries:
-            if not isinstance(raw, dict) or not isinstance(raw.get("hooks"), list):
-                converted.append(copy.deepcopy(raw))
-                continue
-            group_metadata = {
-                key: copy.deepcopy(value)
-                for key, value in raw.items()
-                if key not in {"hooks", "matcher", "type"}
-            }
-            if group_metadata:
-                preserved_metadata.append({"event": event, **group_metadata})
-            matcher = raw.get("matcher")
-            for hook in raw["hooks"]:
-                if not isinstance(hook, dict):
-                    converted.append(copy.deepcopy(hook))
-                    continue
-                if historical_script(event, hook, raw) is not None:
-                    continue
-                native = copy.deepcopy(hook)
-                native.pop("type", None)
-                if matcher is not None and "matcher" not in native:
-                    native["matcher"] = copy.deepcopy(matcher)
-                converted.append(native)
-        return converted
-
-    # Cursor's old grouped adapter used canonical event names in some releases and
-    # native camelCase names in others.  Merge both spellings before directifying every
-    # grouped event, including foreign/custom events not emitted by ARS.
-    for canonical_event, _matcher, _script, _timeout in _BASE_SPECS:
-        destination = adapter.event(canonical_event)
-        if destination == canonical_event or canonical_event not in container:
-            continue
-        source = container.get(canonical_event)
-        existing = container.get(destination)
-        if isinstance(source, list) and isinstance(existing, list):
-            container[destination] = copy.deepcopy(source) + copy.deepcopy(existing)
-            container.pop(canonical_event, None)
-        elif destination not in container:
-            container[destination] = copy.deepcopy(source)
-            container.pop(canonical_event, None)
-
-    for event, entries in list(container.items()):
-        if not isinstance(entries, list) or not entries:
-            continue
-        converted = convert(event, entries)
-        if converted:
-            container[event] = converted
-        else:
-            container.pop(event, None)
-
-    if preserved_metadata:
-        key = "_ars_legacy_cursor_group_metadata"
-        if key not in settings:
-            settings[key] = preserved_metadata
-        else:
-            suffix = 1
-            while f"{key}_{suffix}" in settings:
-                suffix += 1
-            settings[f"{key}_{suffix}"] = preserved_metadata
-
-
 def cleanup(
     settings: dict[str, Any],
     host: Any,
@@ -573,8 +484,14 @@ def cleanup(
     root: str | None = None,
     owned_records: Iterable[dict[str, Any]] | None = None,
     allow_legacy: bool = False,
-) -> tuple[dict[str, Any], list[str], list[str]]:
-    """Remove exact old handlers and return ``(settings, removed, modified)``.
+) -> tuple[dict[str, Any], list[str], list[str], list[str]]:
+    """Remove exact old handlers and return ``(settings, removed, modified, missing)``.
+
+    When manifest records are supplied, every recorded handler receives one status.  A
+    record is ``removed`` only when its complete definition was found and removed;
+    ``modified`` means its command is still identifiable but its definition differs, and
+    ``missing`` means no positive exact-handler proof exists (including an unclassifiable
+    command).  The caller must protect both modified and missing scripts.
 
     A command that looks like an ARS hook but differs from its manifest/legacy definition
     is reported as modified and left in place.  Unknown commands, groups, and config keys
@@ -584,12 +501,8 @@ def cleanup(
     result = copy.deepcopy(settings)
     removed: list[str] = []
     modified: list[str] = []
+    missing: list[str] = []
     adapter = for_host(host)
-    migrate_cursor_grouped = _legacy_grouped_ownership_provened(
-        result, host, root, owned_records, allow_legacy
-    )
-    if migrate_cursor_grouped:
-        _migrate_cursor_grouped(result, host, root)
     nested = _container(result, host)
     containers: list[dict[str, Any]] = []
     if nested is not None:
@@ -598,6 +511,25 @@ def cleanup(
         containers.append(result)
     seen: set[int] = set()
     records = list(owned_records) if owned_records is not None else None
+    record_status: dict[int, str] = {}
+
+    def mark_records(
+        event: str,
+        handler: dict[str, Any],
+        wrapper: dict[str, Any] | None,
+        script: str,
+        status: str,
+    ) -> None:
+        if records is None:
+            return
+        for index, record in enumerate(records):
+            if record.get("script") != script or record.get("event") != event:
+                continue
+            if status == "removed":
+                if _manifest_match(event, handler, wrapper, script, [record]):
+                    record_status[index] = "removed"
+            elif record_status.get(index) != "removed":
+                record_status[index] = "modified"
 
     def inspect(
         event: str, handler: dict[str, Any], wrapper: dict[str, Any] | None
@@ -620,6 +552,14 @@ def cleanup(
             and allow_legacy
             and _legacy_exact_shape(event, handler, wrapper, host, script)
         )
+        if records is not None:
+            mark_records(
+                event,
+                handler,
+                wrapper,
+                script,
+                "removed" if exact else "modified",
+            )
         return script, exact
 
     for container in containers:
@@ -636,13 +576,15 @@ def cleanup(
                     and isinstance(entry, dict)
                     and "command" in entry
                 )
+                # A grouped entry is removed from in place, never rewritten into the
+                # host's current native shape.  Cursor's old adapter wrote Claude-style
+                # groups, and one of those groups can hold a foreign sibling handler:
+                # flattening the wrapper to directify our own child would restructure
+                # somebody else's configuration as a side effect of our cleanup.
                 is_grouped = (
                     isinstance(entry, dict)
                     and isinstance(entry.get("hooks"), list)
-                    and (
-                        adapter.style != "direct"
-                        or (host.id == "cursor" and not migrate_cursor_grouped)
-                    )
+                    and (adapter.style != "direct" or host.id == "cursor")
                 )
                 if is_direct:
                     script, exact = inspect(event, entry, None)
@@ -683,9 +625,25 @@ def cleanup(
                 # represented in the host config.
                 container[event] = copy.deepcopy(raw_entries)
 
+    if records is not None:
+        # A manifest record that never reached ``inspect`` has no positive evidence in the
+        # current config.  This includes a command changed to an unclassifiable form such
+        # as ``python3 -O ...``; it is missing, not safe to treat as stale.
+        for index, record in enumerate(records):
+            if record_status.get(index) in {"removed", "modified"}:
+                continue
+            script = record.get("script")
+            if isinstance(script, str):
+                missing.append(script)
+
     # Empty hooks objects are deliberately retained: they may have been supplied by a
     # foreign host configuration and their shape is not package ownership evidence.
-    return result, sorted(set(removed)), sorted(set(modified))
+    return (
+        result,
+        sorted(set(removed)),
+        sorted(set(modified)),
+        sorted(set(missing)),
+    )
 
 
 def merge(  # noqa: PLR0913, PLR0917
@@ -699,7 +657,7 @@ def merge(  # noqa: PLR0913, PLR0917
     """Compatibility wrapper: cleanup only; never add a desired handler."""
     if not uninstall:
         return copy.deepcopy(settings)
-    cleaned, _removed, _modified = cleanup(
+    cleaned, _removed, _modified, _missing = cleanup(
         settings,
         host,
         root=root,
@@ -723,7 +681,7 @@ def strip_ours(  # noqa: PLR0913
         return []
     wrapper = {"hooks": entries}
     settings = {"hooks": {event or "PreToolUse": wrapper}}
-    cleaned, _removed, _modified = cleanup(
+    cleaned, _removed, _modified, _missing = cleanup(
         settings, host, root=root, owned_records=owned_records, allow_legacy=allow_legacy
     )
     value = cleaned.get("hooks", {}).get(event or "PreToolUse", {})

@@ -2,8 +2,9 @@
 
 Skills and optional slash-command aliases are portable.  ARS no longer installs or
 configures runtime governance hooks on any host.  The legacy hook location fields remain
-so the installer can recognize and clean up an exact old ARS installation during one
-compatibility period without claiming or changing foreign host configuration.
+so the installer can recognize and clean up an exact old ARS installation without claiming
+or changing foreign host configuration; they are removed in 0.9.0 along with the rest of
+the legacy hook path (see docs/DESIGN.md §4).
 """
 
 from __future__ import annotations
@@ -37,7 +38,6 @@ class Host:
     filter_conditions: bool = False
     commands_dir: str | None = None
     caveat: str = ""
-    aliases: tuple[str, ...] = field(default_factory=tuple)
 
 
 HOSTS: tuple[Host, ...] = (
@@ -75,9 +75,20 @@ HOSTS: tuple[Host, ...] = (
         id="kimi",
         skills_dir=".kimi/skills",
         ownership_root=".kimi",
-        detect_paths=(".kimi", ".kimi-code"),
+        detect_paths=(".kimi",),
         hooks_file="settings.json",
-        aliases=("kimi-code",),
+    ),
+    # `.kimi-code` is a second on-disk layout, not a spelling of `.kimi`.  Listing it as a
+    # detect path of the host above meant a project holding only `.kimi-code/` was detected
+    # as kimi and then installed into a newly created `.kimi/`, leaving the directory the
+    # user actually had untouched.  A separate id keeps the manifest and the ownership
+    # allowlist unambiguous, and lets a project that somehow has both keep them apart.
+    Host(
+        id="kimi-code",
+        skills_dir=".kimi-code/skills",
+        ownership_root=".kimi-code",
+        detect_paths=(".kimi-code",),
+        hooks_file="settings.json",
     ),
 )
 
@@ -85,9 +96,11 @@ DEFAULT_HOST = "claude"
 
 
 def lookup(host_id: str) -> Host | None:
+    """Resolve an id to a host.  Every on-disk layout is its own id, never an alias of
+    another, so that a manifest path and the ownership allowlist stay unambiguous."""
     wanted = host_id.strip().lower()
     for host in HOSTS:
-        if wanted == host.id or wanted in host.aliases:
+        if wanted == host.id:
             return host
     return None
 

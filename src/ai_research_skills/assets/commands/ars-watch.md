@@ -1,4 +1,6 @@
 ---
+description: Check what changed in the literature since the last look
+argument-hint: [topic or workspace slug]
 disable-model-invocation: true
 ---
 # /ars-watch

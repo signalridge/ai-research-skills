@@ -4,6 +4,26 @@ A small, user-invoked research toolbox for AI/ML. Each skill is a standalone pee
 what the current question needs, with a prompt, files, links, supplied sources, or an optional
 `.research/survey/<slug>/` workspace.
 
+## What this is not
+
+Most research-skill collections are pipelines: a survey leads to a gap check, which leads to a
+draft, and the tool decides when each step is done. ARS deliberately is not that.
+
+- **Nothing runs unless you ask for it.** No session-start hooks, no phase gates, no skill that
+  fires another skill, no automatic linting, no background watch. Finishing one skill is never
+  permission to start the next. On Claude Code this is enforced by frontmatter; elsewhere it is
+  a declared contract ([docs/DESIGN.md](docs/DESIGN.md#how-user-invoked-is-declared-and-where-it-is-actually-enforced)).
+- **No completion rule pretends to exist.** There is no saturation percentage, no required
+  query count, no PRISMA state machine. Coverage is something you judge and the tools help you
+  describe; the linter checks structure and references, never prose.
+- **Your files stay yours.** The installer owns exactly the files it wrote, verified by digest,
+  and refuses to touch anything else — including when a manifest claims otherwise.
+- **MIT**, so it can be used commercially and vendored. Several adjacent projects are
+  non-commercial or share-alike.
+
+The trade is explicit: you get a sharper set of tools and no automation. If you want something
+that runs a literature review end to end, this is the wrong toolbox.
+
 ## Install
 
 For a persistent CLI, install the tool once and then install into a project:
@@ -19,8 +39,10 @@ For a one-shot install without adding a persistent command:
 uvx --from git+https://github.com/signalridge/ai-research-skills ai-research-skills install .
 ```
 
-The installer detects existing `claude`, `codex`, `cursor`, `pi`, and `kimi` directories, or
-falls back to Claude Code. Use `--host claude,codex` to choose explicitly.
+The installer detects existing `claude`, `codex`, `cursor`, `pi`, `kimi`, and `kimi-code`
+directories, or falls back to Claude Code. Use `--host claude,codex` to choose explicitly.
+`kimi` and `kimi-code` are separate hosts because they are separate on-disk layouts: a project
+is installed into the directory it already has, and neither one creates the other.
 
 Installs contain skills, Claude command aliases, the optional structural linter, and schemas.
 Fresh installs install **no runtime hooks** and do not create or modify host hook settings.
@@ -86,7 +108,9 @@ abstract-only records cannot support.
 With usable evidence, reports separate sourced facts from synthesis; with partial evidence,
 they narrow claims and state the limit. With zero usable evidence, they do not invent citations,
 numbers, or a deterministic sourced report: they state attempts, constraints, and the smallest
-next step. Abstract-only records support only softened high-level wording. The complete
+next step. Abstract-only records support only attributed, softened high-level direction or
+conclusion; they do not support numeric results such as 4 points or 20% unless a named page,
+table, figure, log, or section has been read and recorded. The complete
 `examples/worked-survey/` directory is a compatibility sample, not a required template.
 
 ## Optional integrity tooling

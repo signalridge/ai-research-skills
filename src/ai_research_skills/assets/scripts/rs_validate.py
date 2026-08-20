@@ -33,18 +33,16 @@ if _SCRIPT_DIR not in sys.path:
 
 _FORCE_FALLBACK = os.environ.get("ARS_FORCE_FALLBACK") == "1"
 try:
+    from _yaml_subset import safe_load as _fallback_yaml_load
+except ImportError as exc:  # pragma: no cover
+    sys.stderr.write(f"cannot load bundled YAML parser: {exc}\n")
+    raise SystemExit(2) from exc
+try:
     if _FORCE_FALLBACK:
         raise ImportError
     import yaml  # type: ignore[import-not-found]
 except ImportError:  # pragma: no cover - exercised by bare tests
-    try:
-        from _yaml_subset import safe_load as _fallback_yaml_load
-    except ImportError as exc:  # pragma: no cover
-        sys.stderr.write(f"cannot load bundled YAML parser: {exc}\n")
-        raise SystemExit(2) from exc
     yaml = None
-else:
-    _fallback_yaml_load = None
 
 try:
     if _FORCE_FALLBACK:
@@ -62,12 +60,17 @@ else:
 
 SCHEMA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "schemas")
 MAX_SCHEMA_ERRORS = 12
+# Only the date-typed fields the schemas actually declare.  `check_dates` walks nested
+# structures, and every schema is `additionalProperties: true`, so a bare `date` here made
+# the linter police a key no schema defines: a number annotated
+# `{"value": "6.2 EM", "date": "August 2026"}` was reported as a malformed ISO date even
+# though the field is the user's own extension. Provenance dates in refs.bib are matched by
+# the `rs-provenance` regex instead and are unaffected by this set.
 DATE_FIELDS = {
     "created",
     "last_searched_at",
     "last_checked",
     "accessed",
-    "date",
 }
 
 errors: list[str] = []
@@ -99,20 +102,35 @@ def _iso_dates(value: Any) -> Any:
 def load_yaml(path: str) -> Any:
     try:
         with open(path, encoding="utf-8") as handle:
-            if yaml is not None:
-                value = yaml.safe_load(handle)
-            else:
-                if _fallback_yaml_load is None:
-                    raise RuntimeError("bundled YAML parser is unavailable")
-                value = _fallback_yaml_load(handle)
+            text = handle.read()
     except FileNotFoundError:
         return None
+    except OSError as exc:
+        err(os.path.basename(path), f"unreadable YAML — {exc}")
+        return None
+
+    try:
+        bundled = _fallback_yaml_load(text)
     except Exception as exc:
+        # The bundled parser defines the supported ARS YAML profile.  Native PyYAML is
+        # never allowed to widen that profile (anchors, tags, aliases, and other general
+        # YAML constructs stay rejected in both environments).
         err(os.path.basename(path), f"unparseable YAML — {exc}")
         return None
-    if value is None:
+    if yaml is not None:
+        try:
+            # PyYAML is an additional syntax-rejection oracle only.  Its YAML 1.1
+            # implicit typing is intentionally not compared with the subset's values.
+            yaml.safe_load(text)
+        except Exception as exc:
+            err(
+                os.path.basename(path), f"unparseable YAML — native parser disagrees: {exc}"
+            )
+            return None
+    bundled_normalized = _iso_dates(bundled)
+    if bundled_normalized is None:
         return _YAML_NULL
-    return _iso_dates(value)
+    return bundled_normalized
 
 
 def load_jsonl(path: str) -> list[dict[str, Any]] | None:
@@ -200,6 +218,16 @@ def check_dates(value: Any, where: str = "artifact") -> None:
             check_dates(item, f"{where}[{index}]")
 
 
+def _within(directory: str, path: str) -> bool:
+    """Whether *path* is still inside *directory* once every symlink is resolved."""
+    root = os.path.realpath(directory)
+    target = os.path.realpath(path)
+    try:
+        return os.path.commonpath((root, target)) == root
+    except ValueError:  # different drives on Windows
+        return False
+
+
 def _unique(values: list[Any], label: str) -> set[str]:
     seen: set[str] = set()
     for value in values:
@@ -245,23 +273,46 @@ def check_protocol(protocol: Any) -> dict[str, Any]:
     return protocol
 
 
-def check_corpus(
-    records: list[dict[str, Any]] | None, protocol: dict[str, Any]
-) -> set[str]:
+def check_corpus(records: list[dict[str, Any]] | None, directory: str) -> set[str]:
     if records is None:
         return set()
     keys: list[Any] = []
-    identifiers: dict[str, list[Any]] = {"id": [], "openalex_id": []}
+    # One identifier belongs to one paper regardless of which field carries it, so the
+    # duplicate check has to span the fields rather than run once per field: checking
+    # `id` and `openalex_id` separately misses the record pair that writes the same
+    # identifier into different fields, which is the shape a merge usually produces.
+    identifier_owners: dict[str, set[int]] = {}
     for index, record in enumerate(records):
         label = f"corpus.jsonl[{index}]"
         check_schema(record, "corpus.schema.json", label)
         check_dates(record, label)
         key = record.get("key")
         keys.append(key)
-        for identifier_field, values in identifiers.items():
+        for identifier_field in ("id", "openalex_id"):
             identifier = record.get(identifier_field)
-            if identifier is not None:
-                values.append(identifier)
+            if isinstance(identifier, str) and identifier:
+                identifier_owners.setdefault(identifier, set()).add(index)
+        # `notes_path` is the only reference in the workspace that names a file on disk
+        # rather than another record's key, and it was the one dangling class nothing
+        # checked.  A warning rather than an error: a record may legitimately be written
+        # before its note is, and this toolbox treats an absent artifact as a limitation.
+        notes_path = record.get("notes_path")
+        if isinstance(notes_path, str) and notes_path.strip():
+            parts = [
+                p for p in notes_path.replace("\\", "/").split("/") if p not in ("", ".")
+            ]
+            if not parts or ".." in parts or os.path.isabs(notes_path):
+                err(label, f"notes_path must stay inside the workspace: `{notes_path}`")
+            elif not os.path.exists(os.path.join(directory, *parts)):
+                warn(label, f"notes_path points at a missing file: `{notes_path}`")
+            elif not _within(directory, os.path.join(directory, *parts)):
+                # Spelling the path without `..` is not the same as staying inside the
+                # workspace: a symlink under the survey directory can still name a file
+                # anywhere on the machine, and the literal check above reads it as clean.
+                err(
+                    label,
+                    f"notes_path resolves outside the workspace: `{notes_path}`",
+                )
         if "found_via" not in record:
             warn(label, "recommended `found_via` provenance is missing")
         else:
@@ -271,8 +322,13 @@ def check_corpus(
             elif not all(isinstance(item, str) and item.strip() for item in found_via):
                 err(label, "found_via provenance entries must be non-empty strings")
     key_set = _unique(keys, "corpus.jsonl.key")
-    for identifier_field, values in identifiers.items():
-        _unique(values, f"corpus.jsonl.{identifier_field}")
+    for identifier, owners in sorted(identifier_owners.items()):
+        if len(owners) > 1:
+            err(
+                "corpus.jsonl",
+                f"duplicate identifier `{identifier}` is claimed by "
+                f"{len(owners)} records: {', '.join(str(i) for i in sorted(owners))}",
+            )
     for record in records:
         key = record.get("key", "?")
         corroboration = record.get("corroboration")
@@ -434,10 +490,225 @@ def check_coverage(
             )
 
 
-_ENTRY_RE = re.compile(
-    r"^\s*@(?!(?:string|preamble|comment)\b)\w+\s*[\{\(]\s*([^,\s]+)",
-    re.IGNORECASE | re.MULTILINE,
+_ENTRY_START_RE = re.compile(r"^[ \t]*@", re.MULTILINE)
+# Standard types are recognised as entry starts even when their opening delimiter is
+# malformed.  A line-start `@name` in ordinary prose is otherwise left alone unless it
+# has an entry-looking delimiter, avoiding false positives for email-style text.
+_BIB_ENTRY_TYPES = frozenset(
+    {
+        "article",
+        "book",
+        "booklet",
+        "conference",
+        "dataset",
+        "inbook",
+        "incollection",
+        "inproceedings",
+        "manual",
+        "mastersthesis",
+        "misc",
+        "online",
+        "phdthesis",
+        "proceedings",
+        "software",
+        "techreport",
+        "unpublished",
+    }
 )
+_BIB_DIRECTIVES = frozenset({"comment", "preamble", "string"})
+_BIB_KNOWN_NAMES = _BIB_ENTRY_TYPES | _BIB_DIRECTIVES
+_BIB_TYPE_RE = re.compile(r"[A-Za-z][A-Za-z0-9_:+-]*")
+# Kept as a compatibility name for callers that imported the old recognizer; validation
+# itself deliberately uses `_ENTRY_START_RE` plus the structural scanner below.
+_ENTRY_RE = _ENTRY_START_RE
+
+
+def _bib_scan(
+    text: str, open_index: int, limit: int | None = None, *, find_comma: bool = False
+) -> tuple[int | None, int | None]:
+    """Scan one BibTeX entry without confusing value atoms for outer delimiters."""
+    if open_index >= len(text) or text[open_index] not in "{(":
+        return None, None
+    opener = text[open_index]
+    limit = len(text) if limit is None else min(limit, len(text))
+    braces = 0
+    parens = 0
+    quoted = False
+    quoted_braces = 0
+    after_header = False
+    comma: int | None = None
+    index = open_index + 1
+    while index < limit:
+        char = text[index]
+
+        # BibTeX comments can contain a closing delimiter or a header comma.  A backslash
+        # escapes the percent sign; comments inside a braced atom are data owned by that
+        # atom and cannot affect the outer entry either way.
+        if (
+            char == "%"
+            and not quoted
+            and braces == 0
+            and (index == 0 or text[index - 1] != "\\")
+        ):
+            newline = text.find("\n", index, limit)
+            index = limit if newline < 0 else newline + 1
+            continue
+
+        if quoted:
+            if char == "\\":
+                index += 2
+                continue
+            if char == "{":
+                quoted_braces += 1
+            elif char == "}" and quoted_braces:
+                quoted_braces -= 1
+            elif char == '"' and quoted_braces == 0:
+                quoted = False
+            index += 1
+            continue
+
+        if braces:
+            # A braced atom protects its quotes and parentheses.  Escaped braces are
+            # literal TeX data rather than nesting changes.
+            if char == "\\":
+                index += 2
+                continue
+            if char == "{":
+                braces += 1
+            elif char == "}":
+                braces -= 1
+            index += 1
+            continue
+
+        if char == "\\":
+            index += 2
+            continue
+        if char == "{":
+            braces = 1
+            index += 1
+            continue
+        if after_header and char == '"':
+            quoted = True
+            quoted_braces = 0
+            index += 1
+            continue
+        if opener == "(" and char == "(":
+            parens += 1
+            index += 1
+            continue
+        if opener == "(" and char == ")":
+            if parens:
+                parens -= 1
+                index += 1
+                continue
+            return index, comma
+        if opener == "{" and char == "}":
+            return index, comma
+        if not after_header and char == "," and parens == 0:
+            comma = index
+            after_header = True
+            if find_comma:
+                return None, comma
+        index += 1
+    return None, comma
+
+
+def _entry_end(text: str, open_index: int) -> int | None:
+    """Index of the outer delimiter closing the entry opened at *open_index*."""
+    end, _comma = _bib_scan(text, open_index)
+    return end
+
+
+def _header_comma(text: str, open_index: int, limit: int) -> int | None:
+    """Find the key/value comma before *limit*, ignoring nested values."""
+    _end, comma = _bib_scan(text, open_index, limit, find_comma=True)
+    return comma
+
+
+def _skip_inline_space(text: str, cursor: int) -> int:
+    """Advance over spaces and tabs, stopping at the end of the line."""
+    while cursor < len(text) and text[cursor] in " \t\f\v":
+        cursor += 1
+    return cursor
+
+
+def _splits_header(text: str, cursor: int) -> bool:
+    """Whether a plausible entry header continues on a later line."""
+    while cursor < len(text) and text[cursor].isspace():
+        cursor += 1
+    type_match = _BIB_TYPE_RE.match(text, cursor)
+    if type_match is None:
+        return cursor < len(text) and text[cursor] in "{("
+    following = _skip_inline_space(text, type_match.end())
+    return type_match.group(0).lower() in _BIB_KNOWN_NAMES or (
+        following < len(text) and text[following] in "{("
+    )
+
+
+def _scan_bib_entries(text: str) -> tuple[list[str], list[str]]:
+    """Scan plausible line-start entries and validate their complete structure."""
+    keys: list[str] = []
+    problems: list[str] = []
+    position = 0
+    while True:
+        match = _ENTRY_START_RE.search(text, position)
+        if match is None:
+            break
+        at = match.end() - 1
+        cursor = _skip_inline_space(text, at + 1)
+        type_match = _BIB_TYPE_RE.match(text, cursor)
+        if type_match is None:
+            # `@` followed by a delimiter is an unmistakable malformed entry; a lone
+            # at-sign in a prose line is not.  A header wrapped onto the next line is
+            # reported rather than skipped, so no real entry leaves the key list silently.
+            if cursor < len(text) and text[cursor] in "{(":
+                problems.append("entry type is missing after `@`")
+            elif _splits_header(text, cursor):
+                problems.append("entry header is split across lines after `@`")
+            position = max(match.end(), at + 1)
+            continue
+        entry_type = type_match.group(0)
+        lowered = entry_type.lower()
+        cursor = _skip_inline_space(text, type_match.end())
+        opener = text[cursor] if cursor < len(text) else None
+        plausible = (
+            lowered in _BIB_ENTRY_TYPES
+            or lowered in _BIB_DIRECTIVES
+            or (opener is not None and opener in "{(")
+        )
+        if not plausible:
+            position = max(match.end(), at + 1)
+            continue
+        if opener is None or opener not in "{(":
+            problems.append(f"entry `@{entry_type}` has no opening `{{` or `(` delimiter")
+            position = max(match.end(), at + 1)
+            continue
+
+        end = _entry_end(text, cursor)
+        limit = end if end is not None else len(text)
+        if lowered in _BIB_DIRECTIVES:
+            if end is None:
+                problems.append(f"directive `@{entry_type}` is never closed")
+            position = end + 1 if end is not None else max(match.end(), at + 1)
+            continue
+
+        comma = _header_comma(text, cursor, limit)
+        key_text = text[cursor + 1 : comma if comma is not None else limit].strip()
+        if comma is None or not key_text or re.search(r"\s", key_text):
+            problems.append(f"entry `@{entry_type}` has an invalid key/comma header")
+        elif end is not None:
+            keys.append(key_text)
+        if end is None:
+            problems.append(
+                f"entry `{key_text or '<unknown>'}` is never closed; the file is "
+                "truncated or its delimiters are unbalanced"
+            )
+        position = end + 1 if end is not None else max(match.end(), at + 1)
+    # A malformed opening can be rediscovered while scanning the remainder of a
+    # truncated entry; report that diagnosis once rather than multiplying one defect.
+    return keys, list(dict.fromkeys(problems))
+
+
 _ATTESTATION_RE = re.compile(
     r"^\s*%\s*rs-provenance:\s*key=(?P<key>\S+)\s+id=(?P<id>\S+)\s+"
     r"tool=(?P<tool>\S+)\s+date=(?P<date>\d{4}-\d{2}-\d{2})\s*$",
@@ -457,8 +728,9 @@ def check_refs(
     except OSError as exc:
         err("refs.bib", f"cannot read — {exc}")
         return
-    matches = list(_ENTRY_RE.finditer(text))
-    keys = [match.group(1) for match in matches]
+    keys, structural_problems = _scan_bib_entries(text)
+    for problem in structural_problems:
+        err("refs.bib", problem)
     bib_keys = _unique(keys, "refs.bib.key")
     attestations = list(_ATTESTATION_RE.finditer(text))
     for match in attestations:
@@ -551,7 +823,7 @@ def main() -> int:
     protocol_path = os.path.join(directory, "protocol.yml")
     protocol_present = os.path.exists(protocol_path)
     protocol = load_yaml(protocol_path) if protocol_present else None
-    protocol_data = check_protocol(protocol)
+    check_protocol(protocol)
 
     corpus_path = os.path.join(directory, "corpus.jsonl")
     corpus_present = os.path.exists(corpus_path)
@@ -561,7 +833,7 @@ def main() -> int:
         for record in (records or [])
         if isinstance(record.get("key"), str) and record.get("key")
     }
-    corpus_keys = check_corpus(records, protocol_data)
+    corpus_keys = check_corpus(records, directory)
 
     gaps_path = os.path.join(directory, "gaps.yml")
     gaps_present = os.path.exists(gaps_path)
@@ -597,7 +869,7 @@ def main() -> int:
             "  note: --profile is deprecated and ignored; this linter has no prerequisite checks"
         )
     if yaml is None:
-        print("  note: PyYAML unavailable — bundled YAML subset ran")
+        print("  note: PyYAML unavailable — no second opinion on YAML syntax")
     if jsonschema is None:
         print("  note: jsonschema unavailable — bundled schema subset ran")
     for message in warnings:

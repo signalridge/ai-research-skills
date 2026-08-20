@@ -1,4 +1,6 @@
 ---
+description: Compare evidence for a build/adopt/skip/revisit decision
+argument-hint: [decision or technology]
 disable-model-invocation: true
 ---
 # /ars-brief

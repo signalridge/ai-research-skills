@@ -17,3 +17,7 @@ cells:
     state: abandoned
     trend_evidence: "BM25-era tooling failed here"
     revivable_by: ghost2024missing
+  - coords: {method: iterative, control: retrieval recall}
+    occupants: [ghost2024missing]
+    state: occupied
+    gap_id: G9

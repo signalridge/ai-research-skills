@@ -53,27 +53,11 @@ data:
     print("\n".join(bad) if bad else "json/yaml parse: ok")
     sys.exit(1 if bad else 0)
 
-# Validate the frontmatter contract consumed by host skill listings.
+# Validate the frontmatter contract consumed by host skill and command listings.
+# One stdlib-only implementation, shared with CI and tests/run_tests.py — the rules used
+# to be written out separately here and in the workflow, and covered skills only.
 skills:
-    #!/usr/bin/env -S uv run --group dev python
-    import pathlib, re, sys, yaml
-    bad = []
-    paths = sorted(pathlib.Path("src/ai_research_skills/assets/skills").glob("*/SKILL.md"))
-    for path in paths:
-        match = re.match(r"^---\n(.*?)\n---", path.read_text(), re.S)
-        if not match:
-            bad.append(f"{path}: no frontmatter")
-            continue
-        frontmatter = yaml.safe_load(match.group(1))
-        if not frontmatter.get("name"):
-            bad.append(f"{path}: no name")
-        if not frontmatter.get("description"):
-            bad.append(f"{path}: no description")
-        length = len(" ".join(str(frontmatter.get("description", "")).split()))
-        if length > 1536:
-            bad.append(f"{path}: description {length} chars, over the 1536 cap")
-    print("\n".join(bad) if bad else f"skill frontmatter: ok ({len(paths)} skills)")
-    sys.exit(1 if bad else 0)
+    uv run --no-project python tests/check_frontmatter.py
 
 # What CI runs. Green here means green there.
 check: lint types data skills test test-bare links
