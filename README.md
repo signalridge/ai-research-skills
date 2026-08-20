@@ -39,9 +39,9 @@ For a one-shot install without adding a persistent command:
 uvx --from git+https://github.com/signalridge/ai-research-skills ai-research-skills install .
 ```
 
-The installer detects existing `claude`, `codex`, `cursor`, `pi`, `kimi`, and `kimi-code`
+The installer detects existing `claude`, `codex`, `cursor`, `pi`, `agy`, `kimi`, and `kimi-code`
 directories, or falls back to Claude Code. Use `--host claude,codex` to choose explicitly.
-`kimi` and `kimi-code` are separate hosts because they are separate on-disk layouts: a project
+`agy` is the Google Antigravity CLI layout (`.agents/skills`). `kimi` and `kimi-code` are separate hosts because they use separate on-disk layouts; a project
 is installed into the directory it already has, and neither one creates the other.
 
 Installs contain skills, Claude command aliases, the optional structural linter, and schemas.

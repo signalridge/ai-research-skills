@@ -114,8 +114,8 @@ worked-survey directory is a compatibility sample, not a required template.
 ## 4. Installer and host boundary
 
 Fresh installs put standalone skills and, where available, user-invoked command aliases into
-host skill directories. The current registry has six separate layouts: Claude, Codex, Cursor,
-Pi, Kimi, and Kimi Code. They install no hooks and never modify host hook settings for research
+host skill directories. The current registry has seven separate layouts: Claude, Codex, Cursor,
+Pi, Agy (Google Antigravity), Kimi, and Kimi Code. They install no hooks and never modify host hook settings for research
 validation. The manifest records package-owned ordinary files; atomic transactions, path
 checks, locks, and sealed journals protect upgrades and rollbacks.
 Current manifests use format 2, which older hook-enabled installers reject closed; the current

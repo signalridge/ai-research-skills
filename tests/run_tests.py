@@ -82,8 +82,9 @@ def test_version_and_assets() -> None:
         "all registered hosts are skills-only", all(not host.hooks for host in hosts.HOSTS)
     )
     check(
-        "the host registry has the six separate layouts",
-        hosts.known_ids() == ("claude", "codex", "cursor", "pi", "kimi", "kimi-code"),
+        "the host registry has the seven separate layouts",
+        hosts.known_ids()
+        == ("claude", "codex", "cursor", "pi", "agy", "kimi", "kimi-code"),
     )
     with tempfile.TemporaryDirectory() as raw:
         host = hosts.lookup("claude")
@@ -783,6 +784,26 @@ def test_optional_evidence_and_host_selection() -> None:
             installer.uninstall(str(root), None) == 0,
         )
 
+    # Google Antigravity CLI uses `.agents/skills` for project-local skills.
+    with tempfile.TemporaryDirectory() as raw:
+        root = pathlib.Path(raw)
+        (root / ".agents").mkdir()
+        detected = [host.id for host in hosts.detect(str(root))]
+        check(
+            "an .agents project detects as agy",
+            detected == ["agy"],
+            str(detected),
+        )
+        check(
+            "install(.agents) lands in .agents/skills",
+            installer.install(str(root), None) == 0
+            and (root / ".agents/skills/ars-survey/SKILL.md").is_file(),
+        )
+        check(
+            "uninstall removes the agy install",
+            installer.uninstall(str(root), None) == 0
+            and not (root / ".agents/skills/ars-survey/SKILL.md").exists(),
+        )
     # os.walk on a missing directory yields nothing, so a skill renamed or mistyped in
     # SKILLS used to ship a wheel that installed a silently incomplete suite.
     claude_host = hosts.lookup("claude")

@@ -71,6 +71,13 @@ HOSTS: tuple[Host, ...] = (
         detect_paths=(".pi",),
         hooks_file="settings.json",
     ),
+    # Google Antigravity CLI (`agy`) discovers project-local skills under `.agents/skills`.
+    Host(
+        id="agy",
+        skills_dir=".agents/skills",
+        ownership_root=".agents",
+        detect_paths=(".agents",),
+    ),
     Host(
         id="kimi",
         skills_dir=".kimi/skills",
