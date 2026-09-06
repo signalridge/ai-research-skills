@@ -13,8 +13,8 @@ for, so pointing it at the frontmatter we ship is a standing check that the pars
 read our own files.
 
 Field rules follow the Agent Skills specification (``docs/specification.mdx`` in
-agentskills/agentskills).  The one deliberate deviation is recorded in ``ARS_EXTENSIONS``
-below, with its cost.
+agentskills/agentskills).  Skills use spec fields only; ``ARS_EXTENSIONS`` below is the
+empty guard that keeps it that way.
 """
 
 from __future__ import annotations
@@ -35,17 +35,15 @@ SPEC_FIELDS = frozenset(
     {"name", "description", "license", "allowed-tools", "metadata", "compatibility"}
 )
 
-# `disable-model-invocation` is absent from that table, and the reference validator
-# (`skills-ref validate`) rejects unexpected fields outright — so every ARS skill fails
-# spec validation on this one key, and that is a known, accepted cost.  It is kept because
-# the same spec repository's client-implementation guide names this exact flag as how a
-# skill opts out of model-driven activation, and because Claude Code enforces it and acts
-# on nothing else: it does not read `metadata`.  Dropping the key would make "user-invoked
-# only" — the project's whole position — unenforced on every host rather than one.
+# Skills used to ship `disable-model-invocation: true`, which is absent from that table —
+# the reference validator (`skills-ref validate`) rejects unexpected fields outright, so
+# every ARS skill failed spec validation on that one key.  The flag was removed when the
+# skills were opened to model invocation, and the deviation went with it.
 #
-# Keep this set at exactly one entry.  Each addition is another reason a spec-conformant
-# catalogue can refuse the whole suite.
-ARS_EXTENSIONS = frozenset({"disable-model-invocation"})
+# Keep this set empty.  Each entry added back is another reason a spec-conformant catalogue
+# can refuse the whole suite.  Slash commands are a host feature and keep their own set
+# below; the flag is still meaningful there.
+ARS_EXTENSIONS: frozenset[str] = frozenset()
 
 # Slash commands are a host feature, not an Agent Skills one, so they have their own
 # small field set.  `description` is required: without it a host renders the raw heading
@@ -117,20 +115,19 @@ def check_skill(path: pathlib.Path) -> list[str]:
         if "<" in collapsed or ">" in collapsed:
             bad("`description` contains angle brackets, which the spec disallows")
 
-    # The two halves of the user-invoked declaration have to agree.  The flag is what
-    # Claude Code acts on; the metadata entry is what survives on hosts that drop
-    # unrecognised keys.  A skill carrying one without the other is a silent downgrade.
-    if frontmatter.get("disable-model-invocation") is not True:
-        bad("`disable-model-invocation: true` is missing")
+    # `metadata` is optional and no shipped skill carries one now that the invocation
+    # declaration is gone.  A skill that grows one still owes the spec's string-only rule.
     metadata = frontmatter.get("metadata")
-    if not isinstance(metadata, dict):
-        bad("`metadata` is missing; the portable invocation declaration lives there")
-    else:
-        if metadata.get("ars-invocation") != "user-invoked":
-            bad("`metadata.ars-invocation` is not `user-invoked`")
-        for key, value in metadata.items():
-            if not isinstance(key, str) or not isinstance(value, str):
-                bad(f"`metadata.{key}` is not a string; the spec allows string values only")
+    if metadata is not None:
+        if not isinstance(metadata, dict):
+            bad("`metadata` is present but is not a mapping")
+        else:
+            for key, value in metadata.items():
+                if not isinstance(key, str) or not isinstance(value, str):
+                    bad(
+                        f"`metadata.{key}` is not a string; the spec allows string "
+                        "values only"
+                    )
 
     return problems
 

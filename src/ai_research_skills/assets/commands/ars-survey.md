@@ -9,8 +9,8 @@ Use `ars-survey` when you want a literature-research task. Give it a question, s
 files, links, or a named `.research/survey/<slug>/` workspace.
 
 Choose the work in your request: discover sources, screen a supplied set, extract evidence,
-compare findings, draft a synthesis, or combine those pieces. The skill is standalone and
-user-invoked; there is no required phase order or complete workspace. Ask before saving or
+compare findings, draft a synthesis, or combine those pieces. The skill is standalone; there
+is no required phase order or complete workspace. Ask before saving or
 rewriting persistent artifacts.
 
 Useful prompt:

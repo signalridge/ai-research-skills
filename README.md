@@ -1,7 +1,7 @@
 # ai-research-skills
 
-A small, user-invoked research toolbox for AI/ML. Each skill is a standalone peer: use only
-what the current question needs, with a prompt, files, links, supplied sources, or an optional
+A small research toolbox for AI/ML. Each skill is a standalone peer: use only what the current
+question needs, with a prompt, files, links, supplied sources, or an optional
 `.research/survey/<slug>/` workspace.
 
 ## What this is not
@@ -9,10 +9,12 @@ what the current question needs, with a prompt, files, links, supplied sources, 
 Most research-skill collections are pipelines: a survey leads to a gap check, which leads to a
 draft, and the tool decides when each step is done. ARS deliberately is not that.
 
-- **Nothing runs unless you ask for it.** No session-start hooks, no phase gates, no skill that
-  fires another skill, no automatic linting, no background watch. Finishing one skill is never
-  permission to start the next. On Claude Code this is enforced by frontmatter; elsewhere it is
-  a declared contract ([docs/DESIGN.md](docs/DESIGN.md#how-user-invoked-is-declared-and-where-it-is-actually-enforced)).
+- **No pipeline and no machinery.** No session-start hooks, no phase gates, no skill that fires
+  another skill, no automatic linting, no background watch. Skills are model-invocable — Claude
+  may reach for the one that fits, and you can always name it yourself — but nothing sequences
+  them for you, and opening one is never permission to search the network or write a file you
+  did not name
+  ([docs/DESIGN.md](docs/DESIGN.md#how-invocation-is-declared-and-where-the-limits-actually-are)).
 - **No completion rule pretends to exist.** There is no saturation percentage, no required
   query count, no PRISMA state machine. Coverage is something you judge and the tools help you
   describe; the linter checks structure and references, never prose.
@@ -80,7 +82,10 @@ Claude users also get `/ars-survey`, `/ars-gate`, `/ars-relwork`, `/ars-brief`, 
 `/ars-audit` (legacy-compatible red-team alias), `/ars-verify`, `/ars-help`, and `/ars-lint`.
 Aliases are explicit and do not chain skills. Other hosts use the installed skills by name.
 Nothing runs at install, session start, turn end, or an imagined phase transition.
-The skills and command aliases declare user-only invocation where the host supports that field. A host that does not expose a standard auto-invocation switch cannot enforce this distinction; invoke the named skill or command explicitly. No hook is used to simulate one.
+Skills carry no invocation flag: a host may offer them to its model, and you can always invoke
+one by name yourself. The slash-command aliases stay user-only on hosts that support
+`disable-model-invocation`; where a host has no such switch, treat them as ordinary prompts.
+No hook is used to simulate either.
 
 A workspace is optional. Existing `.research/survey/<slug>/` corpora remain useful, including
 legacy `phase` fields and artifacts. Skills read and write named files only when the user asks;

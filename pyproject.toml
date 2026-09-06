@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ai-research-skills"
-version = "0.8.0"
-description = "A user-invoked, skills-driven research toolbox for AI/ML"
+version = "0.8.1"
+description = "A skills-driven research toolbox for AI/ML"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"

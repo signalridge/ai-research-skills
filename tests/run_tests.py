@@ -76,8 +76,8 @@ def test_version_and_assets() -> None:
     print("\nversion and asset contract")
     from ai_research_skills import __version__, hosts, installer
 
-    check("release version is 0.8.0", __version__ == "0.8.0")
-    check("installer version is 0.8.0", installer.__version__ == "0.8.0")
+    check("release version is 0.8.1", __version__ == "0.8.1")
+    check("installer version is 0.8.1", installer.__version__ == "0.8.1")
     check(
         "all registered hosts are skills-only", all(not host.hooks for host in hosts.HOSTS)
     )
@@ -120,8 +120,8 @@ def test_version_and_assets() -> None:
         "; ".join(frontmatter_problems),
     )
     check(
-        "the spec deviation stays a single documented key",
-        {"disable-model-invocation"} == check_frontmatter.ARS_EXTENSIONS,
+        "skill frontmatter keeps no deviation from the Agent Skills spec",
+        frozenset() == check_frontmatter.ARS_EXTENSIONS,
     )
 
     # Vocabulary from the phase-gate design removed in 0.8.  This is a regression guard

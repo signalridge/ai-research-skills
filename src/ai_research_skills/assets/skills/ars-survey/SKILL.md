@@ -1,25 +1,18 @@
 ---
 name: ars-survey
-disable-model-invocation: true
 description: >
-  A user-invoked, standalone literature-research toolbox for discovering sources, screening
-  evidence, extracting findings, mapping a field, or synthesising an answer. Use when the
-  user asks to survey a topic, find related work, investigate a gap, compare approaches, or
-  build a research corpus. Accepts a direct question, files, links, or supplied sources;
-  optionally uses a named .research workspace when the user asks.
-metadata:
-  # Spec-legal restatement of `disable-model-invocation` above, for the hosts
-  # that ignore fields they do not define.  The flag is what Claude Code
-  # enforces; this is what travels.
-  ars-invocation: user-invoked
+  Standalone literature-research toolbox for discovering sources, screening evidence,
+  extracting findings, mapping a field, or synthesising an answer. Use when the task is to
+  survey a topic, find related work, investigate a gap, compare approaches, or build a
+  research corpus. Accepts a direct question, files, links, or supplied sources; optionally
+  uses a named .research workspace when the user asks.
 ---
 
 # ars-survey — compose the research you need
 
-Use this skill when the user asks for literature research. It is a convenience skill, not a
-workflow controller: run it when it is asked for, and when it finishes, report and stop —
-finishing here is not permission to start a gap assessment, a verification pass, or another
-search round. The user chooses any combination of:
+Use this skill for literature research. It is a convenience skill, not a workflow
+controller: it owns no phase order and no other skill's artifacts, and finishing it is not
+permission to search again or write files the user did not name. Compose any combination of:
 
 - **discover** — search requested backends or inspect supplied sources;
 - **screen** — decide which sources answer the question and explain uncertainty;
@@ -76,8 +69,8 @@ Read the supplied corpus and two PDFs, extract only numbers used in the decision
 write the brief to .research/survey/my-topic/brief.md. Do not broaden the search.
 ```
 
-These are examples, not a required sequence. The user can invoke another skill directly for
-one focused result.
+These are examples, not a required sequence. Another skill can be invoked directly for one
+focused result.
 
 ## Reference cards and report keys
 

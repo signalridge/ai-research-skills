@@ -1,24 +1,18 @@
 ---
 name: ars-verify
-disable-model-invocation: true
 description: >
-  Perform a user-invoked check of citation, provenance, numeric, and source consistency in a user-supplied research
-  draft or optional .research survey workspace. Resolve identifiers or inspect original
-  sources when the user asks; report limits instead of fabricating or silently repairing
-  evidence. Standalone and advisory.
-metadata:
-  # Spec-legal restatement of `disable-model-invocation` above, for the hosts
-  # that ignore fields they do not define.  The flag is what Claude Code
-  # enforces; this is what travels.
-  ars-invocation: user-invoked
+  Check citation, provenance, numeric, and source consistency in a research draft or an
+  optional .research survey workspace. Use when evidence needs to be traceable before it is
+  relied on. Resolve identifiers or inspect original sources when the user asks; report
+  limits instead of fabricating or silently repairing evidence. Standalone and advisory.
 ---
 
 # ars-verify — make evidence traceable
 
-Use this skill for an explicit integrity check. It can inspect a draft, BibTeX file, corpus,
-notes, links, or a named workspace. No completed survey, phase, profile, or output artifact is
-required. It runs only when the user invokes it, and it reports rather than repairs — a failed
-check is never permission to edit, delete, or re-resolve the thing it checked.
+Use this skill for an integrity check. It can inspect a draft, BibTeX file, corpus, notes,
+links, or a named workspace. No completed survey, phase, profile, or output artifact is
+required. It reports rather than repairs — a failed check is never permission to edit,
+delete, or re-resolve the thing it checked.
 
 ## Checks
 

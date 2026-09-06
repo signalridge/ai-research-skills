@@ -1,6 +1,7 @@
 # Update card — optional
 
-Use this card only when the user asks whether a search is broad enough or wants a watch/update.
+Use this card only when the question is whether a search is broad enough, or when an update
+is wanted.
 Try a small additional query family, a seed/citation check, or a targeted venue/author search.
 Stop when the user-set budget or practical return is reached and state the boundary; there is
 no universal saturation percentage or completion gate.

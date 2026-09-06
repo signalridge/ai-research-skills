@@ -1,23 +1,18 @@
 ---
 name: ars-watch
-disable-model-invocation: true
 description: >
-  Run a user-invoked literature watch or update for a topic. Use supplied queries, alerts,
-  sources, or an optional .research survey workspace to report what changed, what may close
-  an open question, and what was not checked. A saved protocol is useful context but never a
-  required phase or prerequisite; ask before writing persistent updates.
-metadata:
-  # Spec-legal restatement of `disable-model-invocation` above, for the hosts
-  # that ignore fields they do not define.  The flag is what Claude Code
-  # enforces; this is what travels.
-  ars-invocation: user-invoked
+  Run a literature watch or update for a topic. Use when the question is what has changed
+  since a previous look: work from supplied queries, alerts, sources, or an optional
+  .research survey workspace to report what changed, what may close an open question, and
+  what was not checked. A saved protocol is useful context but never a required phase or
+  prerequisite; ask before writing persistent updates.
 ---
 
 # ars-watch — a deliberate update, not a background controller
 
-Use this skill when the user asks what is new, wants an alert checked, or wants to keep a
-research question current. It is always invoked by the user. It does not run on session start,
-at turn end, or installation, and it does not schedule its own next run.
+Use this skill when the question is what is new, when an alert needs checking, or when a
+research question should be brought current. It does not run on session start, at turn end,
+or installation, and it does not schedule its own next run.
 
 ## Inputs and modes
 

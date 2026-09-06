@@ -1,6 +1,6 @@
 # Screening card — optional
 
-When the user asks to screen sources, define relevance against the question and explain each
+When sources need screening, define relevance against the question and explain each
 selection briefly.
 
 ## Screening annotates; it does not delete

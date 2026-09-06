@@ -1,7 +1,7 @@
 # Scope card — optional
 
-Use this card when the user asks for a careful scope before searching. It is not a phase or a
-prerequisite.
+Use this card when the question needs a careful scope before searching. It is not a phase or
+a prerequisite.
 
 - Restate the question in the user's terms.
 - Name what is in scope, out of scope, and the relevant date or venue window.

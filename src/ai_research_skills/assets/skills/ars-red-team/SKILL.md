@@ -1,26 +1,19 @@
 ---
 name: ars-red-team
-disable-model-invocation: true
 description: >
-  Perform a user-requested adversarial review of a research question, source set, draft,
-  gap assessment, or decision brief. Try alternative terminology, counterexamples, citation
-  errors, weak numbers, and unsupported conclusions. It is standalone, reports findings, and
-  may search when the user explicitly asks for a refutation search.
-metadata:
-  # Spec-legal restatement of `disable-model-invocation` above, for the hosts
-  # that ignore fields they do not define.  The flag is what Claude Code
-  # enforces; this is what travels.
-  ars-invocation: user-invoked
+  Perform an adversarial review of a research question, source set, draft, gap assessment,
+  or decision brief. Use when a conclusion needs challenging: try alternative terminology,
+  counterexamples, citation errors, weak numbers, and unsupported conclusions. It is
+  standalone, reports findings, and searches only when the user asks for a refutation search.
 ---
 
 # ars-red-team — try to break the answer
 
-Use this skill when the user asks for a challenge or sanity check. It accepts a direct claim,
-draft, files, supplied corpus, or optional `.research/survey/<slug>/` workspace. There is no
-checkpoint schedule and no blocking phase, and it runs only when the user invokes it. A finding
-is a report, not a mandate: do not repair the draft, rerun the search, or escalate to another
-skill on the strength of your own criticism. Choose the smallest review that answers the user's
-request.
+Use this skill when a claim or draft needs a challenge or sanity check. It accepts a direct
+claim, draft, files, supplied corpus, or optional `.research/survey/<slug>/` workspace. There
+is no checkpoint schedule and no blocking phase. A finding is a report, not a mandate: do not
+repair the draft or rerun the search on the strength of your own criticism. Choose the
+smallest review that answers the user's request.
 
 ## Review lenses
 

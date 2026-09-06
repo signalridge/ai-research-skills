@@ -1,23 +1,17 @@
 ---
 name: ars-decision-brief
-disable-model-invocation: true
 description: >
-  Prepare a user-requested build, adopt, skip, or revisit brief from supplied literature,
-  experiments, notes, or an optional .research survey workspace. Compare claims to evidence,
-  reproducibility, cost, and risk. Standalone and direct; it may search only when the user
-  explicitly requests more evidence.
-metadata:
-  # Spec-legal restatement of `disable-model-invocation` above, for the hosts
-  # that ignore fields they do not define.  The flag is what Claude Code
-  # enforces; this is what travels.
-  ars-invocation: user-invoked
+  Prepare a build, adopt, skip, or revisit brief from supplied literature, experiments,
+  notes, or an optional .research survey workspace. Use when a technical choice needs its
+  claims compared against evidence, reproducibility, cost, and risk. Standalone and direct;
+  it searches only when the user explicitly requests more evidence.
 ---
 
 # ars-decision-brief — evidence for a technical choice
 
-Use this skill for a bounded decision, not for managing a research process. It runs only when
-the user invokes it, and writing a recommendation never authorises acting on it: the searches,
-experiments, and edits a brief proposes stay proposals until the user asks. It can work from a
+Use this skill for a bounded decision, not for managing a research process. Writing a
+recommendation never authorises acting on it: the searches, experiments, and edits a brief
+proposes stay proposals until the user asks. It can work from a
 prompt, local files, a corpus, or a named `.research/survey/<slug>/` directory. No phase or
 artifact is required. If the workspace is missing or partial, state the limitation and build
 the best scoped brief from what is available.

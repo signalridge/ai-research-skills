@@ -4,7 +4,7 @@ disable-model-invocation: true
 ---
 # /ars-help
 
-This package is a small, user-invoked research toolbox. Pick one skill for the task:
+This package is a small research toolbox. Pick one skill for the task:
 
 - `ars-survey` — compose discovery, screening, extraction, and synthesis;
 - `ars-gap-gate` — assess whether a gap is open, useful, and feasible;

@@ -1,6 +1,6 @@
 # Comparison card — optional
 
-When the user asks for a map, compare the selected distinctions and show both occupied and
+When the work calls for a map, compare the selected distinctions and show both occupied and
 unknown areas. A coverage file may contain a partial or informal map; there is no required
 Cartesian grid.
 

@@ -1,24 +1,18 @@
 ---
 name: ars-gap-gate
-disable-model-invocation: true
 description: >
-  Give a user-invoked, standalone assessment of a research gap or proposed topic. Examine
-  whether the question is open, useful, and feasible, using a direct prompt, supplied
+  Give a standalone assessment of a research gap or proposed topic. Use when it is unclear
+  whether a question is open, useful, and feasible, working from a direct prompt, supplied
   sources, or an optional .research survey workspace. Return evidence, uncertainty, and
   next tests; do not impose a prerequisite or make the researcher's decision for them.
-metadata:
-  # Spec-legal restatement of `disable-model-invocation` above, for the hosts
-  # that ignore fields they do not define.  The flag is what Claude Code
-  # enforces; this is what travels.
-  ars-invocation: user-invoked
 ---
 
 # ars-gap-gate — assess a gap, not a workflow
 
-Use this skill when the user asks whether an idea is already covered, worth investigating,
+Use this skill when the question is whether an idea is already covered, worth investigating,
 or feasible. The name is retained for command compatibility; this is an advisory assessment,
-not a gate that controls another skill. It runs only when the user invokes it, and a verdict
-of "open" is an answer, not a trigger — do not follow it with a survey or a draft.
+not a gate that controls another skill. A verdict of "open" is an answer, not an instruction:
+it does not by itself authorise a search or a write the user did not ask for.
 
 ## Inputs
 

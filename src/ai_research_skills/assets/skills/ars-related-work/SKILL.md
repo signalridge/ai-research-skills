@@ -1,24 +1,17 @@
 ---
 name: ars-related-work
-disable-model-invocation: true
 description: >
-  Draft a user-requested related-work or literature-review section from supplied sources,
-  direct searches, notes, or an optional .research survey workspace. Organise by meaningful
-  themes, cite claims precisely, preserve disagreement, and state evidence limits. It is a
-  standalone writing skill and may search when the user explicitly asks.
-metadata:
-  # Spec-legal restatement of `disable-model-invocation` above, for the hosts
-  # that ignore fields they do not define.  The flag is what Claude Code
-  # enforces; this is what travels.
-  ars-invocation: user-invoked
+  Draft a related-work or literature-review section from supplied sources, direct searches,
+  notes, or an optional .research survey workspace. Use when a body of sources needs thematic
+  prose synthesis: organise by meaningful themes, cite claims precisely, preserve
+  disagreement, and state evidence limits. Standalone; it searches only when the user asks.
 ---
 
 # ars-related-work — sources to synthesis
 
-Use this skill when the user wants related work, background, or a literature-review section.
-It runs only when the user invokes it, and it does not require a completed survey. Delivering
-a draft does not authorise a follow-up search, a verification pass, or a write to any file the
-user did not name. Start from the supplied corpus or search directly if
+Use this skill when related work, background, or a literature-review section is needed. It
+does not require a completed survey. Delivering a draft does not authorise a further search
+or a write to any file the user did not name. Start from the supplied corpus or search directly if
 the request includes discovery. If `.research/survey/<slug>/` is named, read whichever files
 are present; missing `coverage.yml`, `refs.bib`, or other artifacts are limitations, not
 prerequisite failures.

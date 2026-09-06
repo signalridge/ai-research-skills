@@ -88,9 +88,10 @@ interrupt a user's work automatically.
 ## Host limitations
 
 The installer provides skills on every registered host and slash-command aliases where the host
-supports them, but ARS 0.8 installs no runtime governance hooks. Source skills and commands are
-marked `disable-model-invocation: true`; hosts without that standard setting cannot enforce the
-same user-only distinction, so invoke the named skill or command explicitly.
+supports them, and installs no runtime governance hooks. Skills carry no invocation flag, so any
+host may surface them to its model and you can also invoke one by name. The command aliases are
+marked `disable-model-invocation: true`; a host without that standard setting cannot enforce the
+user-only distinction for them, so treat the commands as ordinary prompts there.
 
 ## LaTeX
 

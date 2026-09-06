@@ -1,9 +1,9 @@
-"""ai-research-skills: a user-invoked research toolbox for AI/ML."""
+"""ai-research-skills: a skills-driven research toolbox for AI/ML."""
 
 from importlib.metadata import distributions
 from pathlib import Path
 
-_FALLBACK_VERSION = "0.8.0"
+_FALLBACK_VERSION = "0.8.1"
 _PACKAGE_INIT = Path("ai_research_skills") / "__init__.py"
 
 

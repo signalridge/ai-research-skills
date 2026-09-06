@@ -1,6 +1,6 @@
 # Discovery card — optional
 
-Use this card when the user asks to discover literature. Combine the source methods that fit
+Use this card when the task is to discover literature. Combine the source methods that fit
 the question rather than treating any fixed list as a requirement.
 
 ## Four complementary angles

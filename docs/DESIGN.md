@@ -6,7 +6,8 @@ has a universal lifecycle.
 
 ## 1. Core model
 
-Every research skill is a peer and is invoked by the user for a concrete task. A skill accepts
+Every research skill is a peer, invoked for a concrete task — by the user, or by the model when
+the task matches what the skill says it is for. A skill accepts
 direct prompt text, local files, links, or supplied sources. It may optionally read or write a
 named `.research/survey/<slug>/` workspace when the user requests that explicitly.
 
@@ -27,10 +28,10 @@ Older workspaces may contain `phase`, counts, recall modes, saturation, or other
 fields. ARS reads them when useful and leaves them intact. It does not migrate, delete, or
 backfill them automatically.
 
-## 2. Skills are composed by the researcher
+## 2. Skills are composed, never sequenced
 
-- **`ars-survey`** is the comprehensive convenience skill. The user can ask for discovery,
-  screening, extraction, mapping, synthesis, or any combination in one request.
+- **`ars-survey`** is the comprehensive convenience skill. One request can cover discovery,
+  screening, extraction, mapping, synthesis, or any combination.
 - **`ars-gap-gate`** assesses whether a proposed gap appears open, useful, and feasible.
 - **`ars-related-work`** turns supplied or requested evidence into thematic prose.
 - **`ars-decision-brief`** compares evidence for a build/adopt/skip/revisit choice.
@@ -42,24 +43,33 @@ No skill owns another skill's phase or artifact. A focused skill can search when
 explicitly asks it to, and it reports exactly what it searched. A missing workspace or source
 is a limitation and a follow-up suggestion, not a workflow failure.
 
-### How "user-invoked" is declared, and where it is actually enforced
+### How invocation is declared, and where the limits actually are
 
-Each skill declares the same thing three times, because no single declaration reaches every
-host:
+Skills carry no invocation flag. Their frontmatter is `name` and `description` and nothing
+else, which is exactly the Agent Skills field set, so `skills-ref validate` accepts them and
+any conformant host may offer them to its model. Selection runs on the `description`: each one
+states what the skill is for, so a model can pick it and a user can still name it directly.
 
-| Declaration | Read by | Effect |
+Earlier releases declared a user-only rule three times over — `disable-model-invocation: true`,
+a `metadata.ars-invocation` mirror for hosts that drop unknown keys, and a sentence in each
+skill body. That rule is gone, along with the one key that made every ARS skill fail spec
+validation. What remains is narrower, and none of it depends on a host reading a non-standard
+field:
+
+| Limit | Where it lives | Effect |
 |---|---|---|
-| `disable-model-invocation: true` | Claude Code | Enforced: the skill is not auto-loaded, not preloaded into subagents, not fired by a scheduled task |
-| `metadata.ars-invocation: user-invoked` | Any spec-conformant reader | Declarative: survives on hosts that drop fields they do not define |
-| A sentence in the skill body | Any model that loads the skill | Behavioural: says what not to chain into |
+| No hooks and no scheduler | The installer writes none | Nothing starts a skill at session start, turn end, or install |
+| No skill orders another | Skill bodies | No skill's text hands off to a follow-on skill; what runs next is the reader's choice |
+| Invocation is not authorisation | Skill bodies | Opening is free; a search, or a write to an unnamed file, still needs the user's word |
 
-The flag is the only one with teeth, and it works on the host clients that support it. It is
-also not in the Agent Skills frontmatter table, so `skills-ref validate` rejects every ARS
-skill on that one key — a known cost, accepted because the spec's own client-implementation
-guidance names this exact flag for opting out of model-driven activation, and because Claude
-Code acts on nothing else (it explicitly does not read `metadata`). Dropping it would make the
-project's central claim unenforced everywhere rather than somewhere.
-`tests/check_frontmatter.py` pins the deviation to that single key.
+The last row carries the weight now. A skill may open on the model's judgement, but the side
+effects a researcher cares about — a network search, a write into `.research/`, an edit to a
+draft — stay gated on an explicit request. `tests/check_frontmatter.py` keeps
+`ARS_EXTENSIONS` empty so the spec-conformance regained here is not quietly spent again.
+
+Slash commands are the exception and keep `disable-model-invocation: true`: a command is
+something the user types, and a model reaching for `/ars-lint` on its own is the automation
+this project does not want.
 
 ### Retrieved text is evidence, not instruction
 
